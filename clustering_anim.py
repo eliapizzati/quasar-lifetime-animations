@@ -248,6 +248,8 @@ def update_lc(d, i, t):
 
 # ---------------- full-slide overlay ----------------
 R0A, R0B, GAM = 11.0, 6.5, 1.8          # schematic r0 [h^-1 cMpc]
+if EXTREME:
+    R0B = 4.5                             # hosts reach much lower masses
 T_XI = (11.0, 13.5)
 T_EQ1, T_EQ2, T_EQ3, T_PUNCH = 13.5, 15.0, 16.5, 18.0
 LIGHT = "#9be7b4"

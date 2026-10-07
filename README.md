@@ -16,6 +16,8 @@ Pedagogical toy models, tuned for clarity on a slide. Not fits to data.
 |---|---|
 | [`videos/clustering_panels_onoff_extreme.mp4`](videos/clustering_panels_onoff_extreme.mp4) | Same halo field, same number of visible quasars. Left: 13 massive hosts, $f_{\rm duty}=0.85$. Right: 220 hosts, $f_{\rm duty}=0.05$. On/off lightcurves. |
 | [`videos/clustering_panels_drw_extreme.mp4`](videos/clustering_panels_drw_extreme.mp4) | As above with damped-random-walk lightcurves; a host is a quasar while $\log L$ is above a threshold. |
+| [`videos/clustering_dutycycle_onoff_full_extreme.mp4`](videos/clustering_dutycycle_onoff_full_extreme.mp4) | Full-slide version of the on/off clip: titles, counters, schematic $\xi(r)$, the $r_0 \to b(M) \to M_{\rm host} \to n_{\rm host}$ chain and $f_{\rm duty} = n_{\rm QSO}/n_{\rm host} \sim t_{\rm Q}/t_{\rm H}$. |
+| [`videos/clustering_dutycycle_drw_full_extreme.mp4`](videos/clustering_dutycycle_drw_full_extreme.mp4) | Full-slide version with DRW lightcurves. |
 | [`videos/proximity_zone_tq.mp4`](videos/proximity_zone_tq.mp4) | Quasar switches on and stays on. $R_{\rm p}$ grows with $t_{\rm Q}$ until H I equilibrium (~$10^5$ yr), plateaus, then grows again as the He II photoheating front passes. |
 | [`videos/proximity_zone_drw.mp4`](videos/proximity_zone_drw.mp4) | Flickering (DRW) quasar: $R_{\rm p}$ follows a lagged, smoothed copy of $L(t)$. |
 
@@ -32,7 +34,7 @@ Individual scripts:
 
 ```bash
 python clustering_anim.py onoff --extreme --info --crop   # or: drw
-python clustering_anim.py drw --full                      # full-slide version with xi(r) and equations
+python clustering_anim.py onoff --extreme --full          # full-slide version with xi(r) and equations
 python proximity_tq.py
 python proximity_drw.py
 python proximity_tq.py 10          # any script + a time in seconds -> still PNG of that frame
