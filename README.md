@@ -47,7 +47,9 @@ He III front speed, …) are knobs at the top of the file.
 ## Model notes
 
 **Clustering** (`clustering_anim.py`). Haloes are drawn from a Gaussian random field with
-mass-dependent bias, so massive haloes cluster. Hosts are the top-$N$ haloes by mass;
+mass-dependent bias, so massive haloes cluster. Hosts are the top-$N$ haloes by mass
+(the cap on halo size never falls below the least massive left-box host, so no non-host
+is drawn as large as a host there);
 $N_{\rm host}$ is chosen so that $f_{\rm duty} N_{\rm host}$ is the same in both boxes.
 The $\xi(r)$ panel in `--full` mode is a schematic power law.
 
@@ -63,6 +65,12 @@ $\alpha_A \propto T^{-0.7}$. Ly$\alpha$ optical depth $\tau \propto \Delta^2 y$ 
 density field. $R_{\rm p}$ is the first radius where the flux, smoothed over ~1 pMpc,
 drops below 10%. Curves show the median over 150 sightlines with the 16–84% band.
 Light-travel-time effects are ignored.
+
+In the DRW clip the He III front is placed beyond the strip (`T_HE_PRIOR`: He III
+recombines slowly, so the front remembers all past activity), so the gas shown is uniformly
+heated and $R_{\rm p}$ responds to $L(t)$ alone. With the front inside the strip, $R_{\rm p}$
+saturates at it whenever $L$ is high. The strip there is 14 pMpc long because the heated
+zone reaches ~10 pMpc in the bright state.
 
 ## License
 

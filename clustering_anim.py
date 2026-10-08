@@ -88,7 +88,11 @@ pk = kk ** -2.8 * np.exp(-(kk / 25) ** 2); pk[0, 0] = 0
 delta = np.real(np.fft.ifft2(np.fft.fft2(rng.normal(size=(NG, NG))) * np.sqrt(pk)))
 delta /= delta.std()
 
-logM = np.clip(np.sort(rng.pareto(1.6, NH) * 0.35)[::-1], 0, 1.6)   # sorted, massive first
+logM = np.sort(rng.pareto(1.6, NH) * 0.35)[::-1]                    # sorted, massive first
+# Cap the tail so a few giants do not dwarf the rest, but never below the least massive
+# left-box host: capped haloes tie in size, and a tie must not straddle host / non-host.
+LOGM_CAP = max(1.6, logM[N_HOST_A - 1])
+logM = np.clip(logM, 0, LOGM_CAP)
 rad = 0.009 + 0.032 * (logM / logM.max()) ** 1.2
 bias = 0.3 + 4.0 * (logM / logM.max())
 
