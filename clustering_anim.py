@@ -77,8 +77,8 @@ if EDD:
     # right: short tau -> brief, rapid flares above the limit
     TAU_A, TAU_B = 12.0, 0.25
     SIG_DEX, L_LIM = 0.4, 0.0
-    GROWTH_DEX = 0.15        # modest: L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
-    SEED_A, TRACK_A = 72, 0
+    GROWTH_DEX = 0.35        # visible but modest: L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
+    SEED_A, TRACK_A = 92, 6
 
 BG, FG = "#3d3d3d", "#ededed"
 GREY, GREEN, STAR = "#b8b8b8", "#5fcf80", "#f7d64a"
@@ -339,9 +339,11 @@ if FULL:
         fig.text(cB_, 0.88, "quasars flicker", ha="center", fontsize=13, color="#cfcfcf")
     cntA = fig.text(cA_, 0.258, "", ha="center", fontsize=14, color=STAR)
     cntB = fig.text(cB_, 0.258, "", ha="center", fontsize=14, color=STAR)
-    eq3A = fig.text(cA_, 0.215, rf"$f_{{\rm duty}} \approx {fA:.2f}$", ha="center",
+    eq3A = fig.text(cA_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if EDD else
+                                 rf"$f_{{\rm duty}} \approx {fA:.2f}$"), ha="center",
                     fontsize=15, color=GREEN, alpha=0)
-    eq3B = fig.text(cB_, 0.215, rf"$f_{{\rm duty}} \approx {fB:.2f}$", ha="center",
+    eq3B = fig.text(cB_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if EDD else
+                                 rf"$f_{{\rm duty}} \approx {fB:.2f}$"), ha="center",
                     fontsize=15, color=LIGHT, alpha=0)
 
     axX = fig.add_axes([0.765, 0.50, 0.215, 0.36], facecolor=BG)
@@ -379,9 +381,11 @@ if INFO and not FULL:
         add_edd_titles(cA_, cB_, 0.905, 0.862)
     cntA = fig.text(cA_, 0.25, "", ha="center", fontsize=17, color=STAR)
     cntB = fig.text(cB_, 0.25, "", ha="center", fontsize=17, color=STAR)
-    eq3A = fig.text(cA_, 0.205, rf"$f_{{\rm duty}} = {fA:.2f}$", ha="center",
+    eq3A = fig.text(cA_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if EDD else
+                                 rf"$f_{{\rm duty}} = {fA:.2f}$"), ha="center",
                     fontsize=18, color=GREEN, alpha=0)
-    eq3B = fig.text(cB_, 0.205, rf"$f_{{\rm duty}} = {fB:.2f}$", ha="center",
+    eq3B = fig.text(cB_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if EDD else
+                                 rf"$f_{{\rm duty}} = {fB:.2f}$"), ha="center",
                     fontsize=18, color=LIGHT, alpha=0)
 
 def update_info(i, t):
