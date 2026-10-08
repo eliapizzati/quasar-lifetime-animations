@@ -1,12 +1,17 @@
 """
 Proximity zone for a flickering (DRW) quasar. Same physics and format as proximity_tq.py.
 
-The quasar has been shining for T_PRE before the clip starts (so the zone and the
-He III heating front are established); during the clip L(t) follows a damped random
-walk in log L. Each cell equilibrates with
+The quasar has been shining for T_PRE before the clip starts (so the H I zone is
+established); during the clip L(t) follows a damped random walk in log L. Each cell
+equilibrates with
     dy/dt = Gamma_UVB [ h(T) - (1 + q L/<L>) y ],  q = (R_S/r)^2
 so R_p tracks a lagged, smoothed copy of L(t) (lag ~ t_eq ~ 1e4 yr near R_p).
 He II heating: front radius ~ (emitted HeII-ionizing photons)^(1/3) ~ (int L dt)^(1/3).
+He III recombines slowly, so the front remembers all past activity, not just T_PRE:
+T_HE_PRIOR adds earlier emission and puts the front beyond the strip. The gas shown is
+then uniformly heated and R_p responds to L(t) alone. (With the front inside the strip,
+R_p saturates at it whenever L is high.) The strip is longer than in proximity_tq.py
+because the heated zone reaches ~10 pMpc in the bright state.
 
   python proximity_drw.py        -> proximity_zone_drw.mp4
   python proximity_drw.py 10     -> still at t = 10 s
@@ -24,12 +29,13 @@ from scipy.ndimage import gaussian_filter, gaussian_filter1d, uniform_filter1d
 SEED, SEED_LC = 3, 5
 FPS, DUR = 30, 15.0
 WINDOW = 600.0              # kyr shown during the clip
-T_PRE = 3000.0              # kyr of prior quasar activity (burn-in)
+T_PRE = 3000.0              # kyr of prior quasar activity (burn-in of the H I zone)
+T_HE_PRIOR = 4.0e4          # kyr of earlier emission at <L>, counted for the He III front only
 DT_PRE = 2.0                # kyr, burn-in step
 SIG_DEX, TAU_DRW = 0.35, 100.0   # DRW scatter [dex] and damping time [kyr]
 T_BKG = 300.0
 R_S = 16.0
-RMAX = 10.0
+RMAX = 14.0                 # pMpc shown
 TAU0 = 60.0
 XHI_BKG = 1e-4
 T0, DT_HEAT = 1.0e4, 3.0e4
@@ -60,12 +66,12 @@ for j, d in enumerate(dt_all):
     x = a * x + np.sqrt(1 - a * a) * rl.normal(); xs[j] = x
 L_all = 10 ** (SIG_DEX * xs)
 L_all /= np.mean(L_all)
-cumL = np.cumsum(L_all * dt_all)                   # emitted energy (in <L> kyr)
+cumL = T_HE_PRIOR + np.cumsum(L_all * dt_all)      # emitted energy (in <L> kyr)
 L = L_all[-NFR:]
 
 # ---------------- gas ----------------
 rng = np.random.default_rng(SEED)
-NR = 1000
+NR = int(round(100 * RMAX))  # 0.01 pMpc cells, as in proximity_tq.py
 r = np.linspace(0.02, RMAX, NR)
 dr = r[1] - r[0]
 g = gaussian_filter1d(rng.normal(size=(N_LOS, NR)), 6, axis=1)
@@ -87,8 +93,11 @@ def rp_all(y):
     return r[idx], F, Fs
 
 # ---------------- evolve ----------------
-y = np.ones((N_LOS, NR))
-RP = np.empty((NFR, N_LOS)); YS = []
+# y(r, t) does not depend on density, so one profile serves every sightline;
+# only the transmission (through Delta) differs between them.
+y = np.ones(NR)
+RP = np.empty((NFR, N_LOS)); YS = np.empty((NFR, NR))
+reb = np.zeros(N_LOS)                                # strongest smoothed-flux rebound past R_p
 nb = len(t_all) - NFR
 for j in range(len(t_all)):
     h = h_of(cumL[j]); qq = q * L_all[j]
@@ -96,21 +105,17 @@ for j in range(len(t_all)):
     y = yeq + (y - yeq) * np.exp(-(1 + qq) / T_BKG * dt_all[j])
     if j >= nb:
         i = j - nb
-        RP[i] = rp_all(y)[0]
-        YS.append(y.copy())
-YS = np.array(YS)                                    # (NFR, N_LOS, NR)
+        RP[i], _, Fs = rp_all(y)
+        YS[i] = y
+        reb = np.maximum(reb, np.where(r[None, :] > RP[i][:, None] + 0.3, Fs, 0).max(axis=1))
 med = np.median(RP, axis=1)
 lo16, hi84 = np.percentile(RP, 16, axis=1), np.percentile(RP, 84, axis=1)
 
 # displayed sightline: tracks the median, no strong rebound past R_p
-Fs_all = uniform_filter1d(np.exp(-TAU0 * Delta[None] ** 2 * YS), box, axis=2)
-reb = np.zeros(N_LOS)
-for jj in range(N_LOS):
-    m = r[None, :] > RP[:, jj, None] + 0.3
-    reb[jj] = np.max(np.where(m, Fs_all[:, jj], 0))
 score = np.mean(np.abs(RP - med[:, None]), axis=0) + 8 * np.clip(reb - 0.12, 0, None)
 k = int(np.argmin(score))
-Yk = YS[:, k]; Fk = np.exp(-TAU0 * Delta[k] ** 2 * Yk); Fks = Fs_all[:, k]; RPk = RP[:, k]
+Yk = YS; Fk = np.exp(-TAU0 * Delta[k] ** 2 * Yk); RPk = RP[:, k]
+Fks = uniform_filter1d(Fk, box, axis=1)
 NY = 50
 tex = gaussian_filter(rng.normal(size=(NY, NR)), (4, 6)); tex /= tex.std()
 Delta2 = np.exp(0.7 * (0.75 * g[k][None, :] + 0.66 * tex) - 0.5 * 0.49)
@@ -119,6 +124,7 @@ logL = np.log10(L)
 # ---------------- figure ----------------
 fig = plt.figure(figsize=(12.8, 7.2), dpi=150, facecolor=BG)
 X0, W = 0.085, 0.825
+XLO = -0.1 * RMAX            # left margin of the sightline panels (room for the quasar)
 
 def style(ax):
     for s_ in ["top", "right"]: ax.spines[s_].set_visible(False)
@@ -130,18 +136,18 @@ axS = fig.add_axes([X0, 0.80, W, 0.15])
 cm_h = LinearSegmentedColormap.from_list("hi", ["#fbf6e3", "#c9d0e2", "#7f8db5"])
 imH = axS.imshow(np.zeros((NY, NR)), extent=[0, RMAX, 0, 1], aspect="auto", cmap=cm_h,
                  vmin=-6.3, vmax=-3.5, origin="lower", interpolation="bilinear")
-axS.set_xlim(-1.0, RMAX); axS.set_ylim(0, 1); axS.axis("off")
+axS.set_xlim(XLO, RMAX); axS.set_ylim(0, 1); axS.axis("off")
 axS.add_patch(plt.Rectangle((0, 0), RMAX, 1, fill=False, ec=SPINE, lw=2.5))
 cax = fig.add_axes([X0 + W + 0.012, 0.80, 0.011, 0.15])
 cb = fig.colorbar(imH, cax=cax, ticks=[-6, -5, -4])
 cb.outline.set_edgecolor(SPINE); cb.ax.tick_params(labelsize=15, colors=WHITE)
 cb.set_label(r"$\log x_{\rm HI}$", fontsize=19, color=WHITE)
-glow = axS.scatter([-0.5], [0.5], s=0, c=STAR, alpha=0.25, lw=0, zorder=4, clip_on=False)
-qso = axS.scatter([-0.5], [0.5], s=500, marker="*", c=STAR, ec="#8a6d00", lw=0.8,
+glow = axS.scatter([0.5 * XLO], [0.5], s=0, c=STAR, alpha=0.25, lw=0, zorder=4, clip_on=False)
+qso = axS.scatter([0.5 * XLO], [0.5], s=500, marker="*", c=STAR, ec="#8a6d00", lw=0.8,
                   zorder=5, clip_on=False)
 
 axF = fig.add_axes([X0, 0.50, W, 0.25], facecolor=BG); style(axF)
-axF.set_xlim(-1.0, RMAX); axF.set_ylim(-0.05, 1.22)
+axF.set_xlim(XLO, RMAX); axF.set_ylim(-0.05, 1.22)
 axF.spines["bottom"].set_bounds(0, RMAX)
 axF.set_xticks(np.arange(0, RMAX + 0.1, 2)); axF.set_yticks([0, 0.5, 1])
 axF.set_xlabel("distance from quasar [pMpc]", fontsize=LAB, labelpad=3)
@@ -178,7 +184,7 @@ def frame(i):
     fline.set_data(r, Fk[i]); sline.set_data(r, Fks[i])
     if ffill[0] is not None: ffill[0].remove()
     ffill[0] = axF.fill_between(r, 0, Fk[i], color=FG, alpha=0.10, lw=0)
-    rpl.set_xdata([RPk[i]] * 2); rpt.set_x(RPk[i] + 0.12)
+    rpl.set_xdata([RPk[i]] * 2); rpt.set_x(RPk[i] + 0.012 * RMAX)
     m = slice(0, i + 1)
     lline.set_data(t_kyr[m], logL[m]); ldot.set_data([t_kyr[i]], [logL[i]])
     mline.set_data(t_kyr[m], med[m]); mdot.set_data([t_kyr[i]], [med[i]])
@@ -187,9 +193,13 @@ def frame(i):
     return []
 
 if __name__ == "__main__":
-    print(f"logL range {np.ptp(logL):.2f} dex | Rp med {med.min():.2f}-{med.max():.2f} | k={k}")
+    Rh = R_HE_10MYR * (cumL[-NFR:] / 1e4) ** (1 / 3)
+    print(f"logL range {np.ptp(logL):.2f} dex | Rp med {med.min():.2f}-{med.max():.2f} | k={k}"
+          f" | He III front {Rh[0]:.1f}-{Rh[-1]:.1f} pMpc | never below 10% within RMAX:"
+          f" {(RP >= r[-1]).mean():.1%} of sightline-frames")
     if len(sys.argv) > 1:
-        frame(int(float(sys.argv[1]) * FPS)); fig.savefig("pz_drw_still.png", facecolor=BG)
+        frame(min(max(int(float(sys.argv[1]) * FPS), 0), NFR - 1))   # t = DUR -> last frame
+        fig.savefig("pz_drw_still.png", facecolor=BG)
     else:
         FuncAnimation(fig, frame, frames=NFR, blit=False).save(
             "proximity_zone_drw.mp4",

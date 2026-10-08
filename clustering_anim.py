@@ -22,6 +22,7 @@ Examples:
   python clustering_anim.py onoff --extreme --info --crop
   python clustering_anim.py drw --extreme --info --crop
   python clustering_anim.py drw 12 --extreme --info      # still frame at t = 12 s
+  python clustering_anim.py 12                           # same, default mode (drw)
 """
 import sys
 import numpy as np
@@ -36,7 +37,16 @@ INFO = "--info" in sys.argv          # boxes + lightcurves + N_QSO/N_host/f_duty
 EXTREME = "--extreme" in sys.argv    # f_duty 0.85 vs 0.05
 CROP = "--crop" in sys.argv          # also write a cropped (boxes + lightcurves) video
 sys.argv = [a for a in sys.argv if a not in ("--full", "--info", "--extreme", "--crop")]
-MODE = sys.argv[1] if len(sys.argv) > 1 else "drw"
+MODE, STILL_T = "drw", None         # positionals: lightcurve mode and/or still time [s]
+for _a in sys.argv[1:]:
+    if _a in ("onoff", "drw"):
+        MODE = _a
+    else:
+        try:
+            STILL_T = float(_a)
+        except ValueError:
+            sys.exit(f"unknown argument {_a!r}: expected onoff|drw, a time in seconds, "
+                     "or --extreme/--info/--full/--crop")
 SEED_FIELD, SEED_A, SEED_B = 7, 45, 21
 TRACK_A = 12      # host shown in the left lightcurve strip (DRW mode; None = auto-pick)
 
@@ -78,7 +88,11 @@ pk = kk ** -2.8 * np.exp(-(kk / 25) ** 2); pk[0, 0] = 0
 delta = np.real(np.fft.ifft2(np.fft.fft2(rng.normal(size=(NG, NG))) * np.sqrt(pk)))
 delta /= delta.std()
 
-logM = np.clip(np.sort(rng.pareto(1.6, NH) * 0.35)[::-1], 0, 1.6)   # sorted, massive first
+logM = np.sort(rng.pareto(1.6, NH) * 0.35)[::-1]                    # sorted, massive first
+# Cap the tail so a few giants do not dwarf the rest, but never below the least massive
+# left-box host: capped haloes tie in size, and a tie must not straddle host / non-host.
+LOGM_CAP = max(1.6, logM[N_HOST_A - 1])
+logM = np.clip(logM, 0, LOGM_CAP)
 rad = 0.009 + 0.032 * (logM / logM.max()) ** 1.2
 bias = 0.3 + 4.0 * (logM / logM.max())
 
@@ -148,7 +162,8 @@ def pick_track(l, thr, want, min_len=0.4):
             best, best_s = j, sc
     return best
 
-trackA = TRACK_A if (MODE == "drw" and TRACK_A is not None) else pick_track(lA, thrA, 2)
+trackA = (TRACK_A if (MODE == "drw" and TRACK_A is not None and TRACK_A < N_HOST_A)
+          else pick_track(lA, thrA, 2))
 trackB = pick_track(lB, thrB, 2 if EXTREME else 4)
 
 # ---------------- figure ----------------
@@ -341,8 +356,8 @@ def frame(i):
     return []
 
 if __name__ == "__main__":
-    if len(sys.argv) > 2:
-        frame(int(float(sys.argv[2]) * FPS))
+    if STILL_T is not None:
+        frame(min(max(int(STILL_T * FPS), 0), NFR - 1))   # t = DUR -> last frame
         fig.savefig(f"still_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_extreme' if EXTREME else ''}.png", facecolor=BG)
     else:
         nA = (lA[t_frames >= T_QSO] > thrA).sum(1)
@@ -357,7 +372,7 @@ if __name__ == "__main__":
             savefig_kwargs={"facecolor": BG})
         if CROP and not FULL:
             import subprocess
-            cropped = out.replace("clustering_dutycycle_", "clustering_panels_")
+            cropped = out.replace("clustering_dutycycle_", "clustering_panels_").replace("_info", "")
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", out,
                             "-vf", "crop=1320:930:20:150", "-c:v", "libx264",
                             "-pix_fmt", "yuv420p", "-b:v", "6M", cropped], check=True)

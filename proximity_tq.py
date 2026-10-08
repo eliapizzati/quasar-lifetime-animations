@@ -213,7 +213,8 @@ if __name__ == "__main__":
     for x in [0.3, 1, 3, 10, 30, 100, 1e3, 3e3, 1e4]:
         j = np.argmin(abs(tQ - x)); print(f"  tQ={x*1e3:.0e} yr  Rp_med={med[j]:.2f}  Rp_k={RPk[j]:.2f}")
     if len(sys.argv) > 1:
-        frame(int(float(sys.argv[1]) * FPS)); fig.savefig("pz_tq_still.png", facecolor=BG)
+        frame(min(max(int(float(sys.argv[1]) * FPS), 0), NFR - 1))   # t = DUR -> last frame
+        fig.savefig("pz_tq_still.png", facecolor=BG)
     else:
         FuncAnimation(fig, frame, frames=NFR, blit=False).save(
             "proximity_zone_tq.mp4",
