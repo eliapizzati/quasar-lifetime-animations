@@ -14,6 +14,8 @@ Lightcurve modes (first argument):
 
 Flags:
   --extreme  f_duty = 0.85 (13 hosts) vs 0.05 (220 hosts)  [default: 0.75 vs 0.15]
+  --edd      as --extreme, plus very different DRW coherence times: long, continuous
+             growth on the left vs short rapid bursts on the right (drw mode)
   --info     add N_QSO / N_host counters and f_duty under each box
   --full     full-slide version: titles, counters, xi(r) panel, equations, punchline
   --crop     also write a version cropped to the two boxes + lightcurves (needs ffmpeg)
@@ -36,7 +38,9 @@ FULL = "--full" in sys.argv          # full slide: titles, counters, xi(r), equa
 INFO = "--info" in sys.argv          # boxes + lightcurves + N_QSO/N_host/f_duty text only
 EXTREME = "--extreme" in sys.argv    # f_duty 0.85 vs 0.05
 CROP = "--crop" in sys.argv          # also write a cropped (boxes + lightcurves) video
-sys.argv = [a for a in sys.argv if a not in ("--full", "--info", "--extreme", "--crop")]
+EDD = "--edd" in sys.argv            # long Eddington-limited episodes vs short rapid bursts
+EXTREME = EXTREME or EDD
+sys.argv = [a for a in sys.argv if a not in ("--full", "--info", "--extreme", "--crop", "--edd")]
 MODE, STILL_T = "drw", None         # positionals: lightcurve mode and/or still time [s]
 for _a in sys.argv[1:]:
     if _a in ("onoff", "drw"):
@@ -46,7 +50,7 @@ for _a in sys.argv[1:]:
             STILL_T = float(_a)
         except ValueError:
             sys.exit(f"unknown argument {_a!r}: expected onoff|drw, a time in seconds, "
-                     "or --extreme/--info/--full/--crop")
+                     "or --extreme/--edd/--info/--full/--crop")
 SEED_FIELD, SEED_A, SEED_B = 7, 45, 21
 TRACK_A = 12      # host shown in the left lightcurve strip (DRW mode; None = auto-pick)
 
@@ -57,10 +61,16 @@ N_HOST_B = 80         # right: top-80 haloes by mass     -> f_duty = 0.15
 TAU_A, TAU_B = 3.0, 1.2    # DRW damping times (animation seconds)
 PER_A, PER_B = 6.0, 2.5    # on/off cycle periods (animation seconds)
 NH = 210
+CAP_A = None          # Eddington ceiling on the left DRW (units of its sigma); None = no cap
 if EXTREME:
     N_QSO, N_HOST_A, N_HOST_B = 11, 13, 220     # f_duty = 0.85 and 0.05
     PER_A, PER_B = 8.0, 6.0
     NH = 290
+if EDD:
+    # same DRW on both sides, only the coherence time differs:
+    # left: long tau -> long, continuous growth phases (Eddington-limited-like)
+    # right: short tau -> brief, rapid bursts above threshold
+    TAU_A, TAU_B = 20.0, 0.25
 
 BG, FG = "#3d3d3d", "#ededed"
 GREY, GREEN, STAR = "#b8b8b8", "#5fcf80", "#f7d64a"
@@ -136,6 +146,8 @@ def onoff(rlc, n, per, f, soft=0.05):
 if MODE == "drw":
     lA, lB = drw(rA_, N_HOST_A, TAU_A), drw(rB_, N_HOST_B, TAU_B)
     thrA, thrB = norm.ppf(1 - fA), norm.ppf(1 - fB)
+    if CAP_A is not None:
+        lA = np.minimum(lA, CAP_A)     # Eddington-limited (cap sits above threshold)
 else:
     lA, lB = onoff(rA_, N_HOST_A, PER_A, fA), onoff(rB_, N_HOST_B, PER_B, fB)
     thrA = thrB = 0.5
@@ -162,9 +174,29 @@ def pick_track(l, thr, want, min_len=0.4):
             best, best_s = j, sc
     return best
 
-trackA = (TRACK_A if (MODE == "drw" and TRACK_A is not None and TRACK_A < N_HOST_A)
-          else pick_track(lA, thrA, 2))
-trackB = pick_track(lB, thrB, 2 if EXTREME else 4)
+def pick_long(l, thr):
+    """Left host for the long-coherence scenario: on for the whole clip, with a clear slow
+    wander that stays comfortably above threshold and no net decline."""
+    v = l[t_frames >= T_QSO]
+    best, best_s = 0, -np.inf
+    for j in range(v.shape[1]):
+        on_all = (v[:, j] > thr).all()
+        wander = np.ptp(v[:, j])
+        margin = v[:, j].min() - thr
+        n = len(v)
+        drop = v[: n // 4, j].mean() - v[-n // 4 :, j].mean()     # net decline
+        sc = 10 * on_all + wander - 3 * max(0, 0.3 - margin) - 3 * max(0, drop)
+        if sc > best_s:
+            best, best_s = j, sc
+    return best
+
+if EDD and MODE == "drw":
+    trackA = pick_long(lA, thrA)
+    trackB = pick_track(lB, thrB, 4, min_len=0.1)
+else:
+    trackA = (TRACK_A if (MODE == "drw" and TRACK_A is not None and TRACK_A < N_HOST_A)
+              else pick_track(lA, thrA, 2))
+    trackB = pick_track(lB, thrB, 2 if EXTREME else 4)
 
 # ---------------- figure ----------------
 fig = plt.figure(figsize=(12.8, 7.2), dpi=150, facecolor=BG)
@@ -190,7 +222,7 @@ def make_layer(ax, hosts):
 scA, stA = make_layer(axA, hostsA)
 scB, stB = make_layer(axB, hostsB)
 
-def lc_axes(x0, l, thr, label_thr=False):
+def lc_axes(x0, l, thr, label_thr=False, cap=None):
     ax = fig.add_axes([x0, 0.07, BOX_W, 0.13], facecolor=BG)
     v = l[t_frames >= T_QSO]
     if MODE == "drw":
@@ -209,14 +241,19 @@ def lc_axes(x0, l, thr, label_thr=False):
         ax.axhline(thr, color="#cfcfcf", lw=1.0, ls="--")
         if label_thr:
           ax.text(DUR - 0.1, thr + 0.08 * (hi - lo), "threshold", ha="right", va="bottom",
-                fontsize=10, color="#cfcfcf")
+                fontsize=10, color="#cfcfcf", zorder=10,
+                bbox=dict(facecolor=BG, edgecolor="none", alpha=0.85, pad=1.5))
+        if cap is not None:
+            ax.axhline(cap, color="#f39c5a", lw=1.4)
+            ax.text(DUR - 0.1, cap + 0.08 * (hi - lo), "Eddington limit", ha="right",
+                    va="bottom", fontsize=10, color="#f6b98a")
     line, = ax.plot([], [], color="#d9d9d9", lw=1.8)
     above, = ax.plot([], [], color=STAR, lw=2.2)
     dot, = ax.plot([], [], "o", ms=6, color=STAR)
     ax.set_visible(False)
     return dict(ax=ax, l=l, thr=thr, line=line, above=above, dot=dot, fill=None)
 
-LCA = lc_axes(X0A, lA[:, trackA], thrA)
+LCA = lc_axes(X0A, lA[:, trackA], thrA, cap=CAP_A if MODE == "drw" else None)
 LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=True)
 
 grey = np.array(matplotlib.colors.to_rgba(GREY))
@@ -261,6 +298,14 @@ def update_lc(d, i, t):
         d["fill"] = d["ax"].fill_between(tt, d["thr"], yy, where=yy > d["thr"],
                                          color=STAR, alpha=0.25, lw=0)
 
+def add_edd_titles(cA_, cB_, y1, y2):
+    fig.text(cA_, y1, "Long, continuous growth", ha="center", fontsize=17, weight="bold")
+    fig.text(cA_, y2, r"long $\tau_{\rm DRW}$, Eddington-limited-like", ha="center", fontsize=14,
+             color="#cfcfcf")
+    fig.text(cB_, y1, "Short, rapid bursts", ha="center", fontsize=17, weight="bold")
+    fig.text(cB_, y2, r"short $\tau_{\rm DRW}$", ha="center", fontsize=14,
+             color="#cfcfcf")
+
 # ---------------- full-slide overlay ----------------
 R0A, R0B, GAM = 11.0, 6.5, 1.8          # schematic r0 [h^-1 cMpc]
 if EXTREME:
@@ -268,12 +313,16 @@ if EXTREME:
 T_XI = (11.0, 13.5)
 T_EQ1, T_EQ2, T_EQ3, T_PUNCH = 13.5, 15.0, 16.5, 18.0
 LIGHT = "#9be7b4"
+COUNT_EVERY = 6 if EDD else 1     # frames between counter refreshes
 if FULL:
     cA_, cB_ = X0A + BOX_W / 2, X0B + BOX_W / 2
-    fig.text(cA_, 0.925, "Large halos, high duty cycle", ha="center", fontsize=17, weight="bold")
-    fig.text(cA_, 0.88, "quasars stay on", ha="center", fontsize=13, color="#cfcfcf")
-    fig.text(cB_, 0.925, "Small halos, low duty cycle", ha="center", fontsize=17, weight="bold")
-    fig.text(cB_, 0.88, "quasars flicker", ha="center", fontsize=13, color="#cfcfcf")
+    if EDD:
+        add_edd_titles(cA_, cB_, 0.925, 0.88)
+    else:
+        fig.text(cA_, 0.925, "Large halos, high duty cycle", ha="center", fontsize=17, weight="bold")
+        fig.text(cA_, 0.88, "quasars stay on", ha="center", fontsize=13, color="#cfcfcf")
+        fig.text(cB_, 0.925, "Small halos, low duty cycle", ha="center", fontsize=17, weight="bold")
+        fig.text(cB_, 0.88, "quasars flicker", ha="center", fontsize=13, color="#cfcfcf")
     cntA = fig.text(cA_, 0.258, "", ha="center", fontsize=14, color=STAR)
     cntB = fig.text(cB_, 0.258, "", ha="center", fontsize=14, color=STAR)
     eq3A = fig.text(cA_, 0.215, rf"$f_{{\rm duty}} \approx {fA:.2f}$", ha="center",
@@ -312,6 +361,8 @@ if FULL:
 
 if INFO and not FULL:
     cA_, cB_ = X0A + BOX_W / 2, X0B + BOX_W / 2
+    if EDD:
+        add_edd_titles(cA_, cB_, 0.905, 0.862)
     cntA = fig.text(cA_, 0.25, "", ha="center", fontsize=17, color=STAR)
     cntB = fig.text(cB_, 0.25, "", ha="center", fontsize=17, color=STAR)
     eq3A = fig.text(cA_, 0.205, rf"$f_{{\rm duty}} = {fA:.2f}$", ha="center",
@@ -321,14 +372,16 @@ if INFO and not FULL:
 
 def update_info(i, t):
     if t >= T_QSO:
-        onA = int((lA[i] > thrA).sum()); onB = int((lB[i] > thrB).sum())
+        j = i - (i % COUNT_EVERY)
+        onA = int((lA[j] > thrA).sum()); onB = int((lB[j] > thrB).sum())
         cntA.set_text(rf"$N_{{\rm QSO}}$ = {onA:2d}   /   $N_{{\rm host}}$ = {N_HOST_A}")
         cntB.set_text(rf"$N_{{\rm QSO}}$ = {onB:2d}   /   $N_{{\rm host}}$ = {N_HOST_B}")
     a = ease(t, T_QSO + 1.0, T_QSO + 2.0); eq3A.set_alpha(a); eq3B.set_alpha(a)
 
 def update_overlay(i, t):
     if t >= T_QSO:
-        onA = int((lA[i] > thrA).sum()); onB = int((lB[i] > thrB).sum())
+        j = i - (i % COUNT_EVERY)
+        onA = int((lA[j] > thrA).sum()); onB = int((lB[j] > thrB).sum())
         cntA.set_text(rf"$N_{{\rm QSO}}$ on = {onA}   /   $N_{{\rm host}}$ = {N_HOST_A}")
         cntB.set_text(rf"$N_{{\rm QSO}}$ on = {onB}   /   $N_{{\rm host}}$ = {N_HOST_B}")
     if t >= T_XI[0]:
@@ -358,13 +411,13 @@ def frame(i):
 if __name__ == "__main__":
     if STILL_T is not None:
         frame(min(max(int(STILL_T * FPS), 0), NFR - 1))   # t = DUR -> last frame
-        fig.savefig(f"still_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_extreme' if EXTREME else ''}.png", facecolor=BG)
+        fig.savefig(f"still_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_edd' if EDD else ('_extreme' if EXTREME else '')}.png", facecolor=BG)
     else:
         nA = (lA[t_frames >= T_QSO] > thrA).sum(1)
         nB = (lB[t_frames >= T_QSO] > thrB).sum(1)
         print(f"[{MODE}] f_duty A={fA:.2f} B={fB:.2f} | N_on A {nA.mean():.1f}±{nA.std():.1f}"
               f"  B {nB.mean():.1f}±{nB.std():.1f}")
-        out = f"clustering_dutycycle_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_extreme' if EXTREME else ''}.mp4"
+        out = f"clustering_dutycycle_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_edd' if EDD else ('_extreme' if EXTREME else '')}.mp4"
         FuncAnimation(fig, frame, frames=NFR, blit=False).save(
             out,
             writer=FFMpegWriter(fps=FPS, bitrate=6000, codec="libx264",
@@ -374,6 +427,6 @@ if __name__ == "__main__":
             import subprocess
             cropped = out.replace("clustering_dutycycle_", "clustering_panels_").replace("_info", "")
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", out,
-                            "-vf", "crop=1320:930:20:150", "-c:v", "libx264",
+                            "-vf", "crop=1320:1040:0:40" if EDD else "crop=1320:930:20:150", "-c:v", "libx264",
                             "-pix_fmt", "yuv420p", "-b:v", "6M", cropped], check=True)
             print("wrote", cropped)
