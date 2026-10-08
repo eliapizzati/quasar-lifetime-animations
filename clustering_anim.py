@@ -14,8 +14,9 @@ Lightcurve modes (first argument):
 
 Flags:
   --extreme  f_duty = 0.85 (13 hosts) vs 0.05 (220 hosts)  [default: 0.75 vs 0.15]
-  --edd      as --extreme, plus very different DRW coherence times: long, continuous
-             growth on the left vs short rapid bursts on the right (drw mode)
+  --edd      as --extreme, but both boxes share one survey limit in log L_bol; the duty
+             cycles come from different mean luminosities, and the DRW coherence times
+             differ: long sustained episodes (left) vs short rapid bursts (right). drw mode
   --info     add N_QSO / N_host counters and f_duty under each box
   --full     full-slide version: titles, counters, xi(r) panel, equations, punchline
   --crop     also write a version cropped to the two boxes + lightcurves (needs ffmpeg)
@@ -61,16 +62,20 @@ N_HOST_B = 80         # right: top-80 haloes by mass     -> f_duty = 0.15
 TAU_A, TAU_B = 3.0, 1.2    # DRW damping times (animation seconds)
 PER_A, PER_B = 6.0, 2.5    # on/off cycle periods (animation seconds)
 NH = 210
-CAP_A = None          # Eddington ceiling on the left DRW (units of its sigma); None = no cap
 if EXTREME:
     N_QSO, N_HOST_A, N_HOST_B = 11, 13, 220     # f_duty = 0.85 and 0.05
     PER_A, PER_B = 8.0, 6.0
     NH = 290
+SIG_DEX, L_LIM = 1.0, None   # DRW scatter [dex]; common detection limit (None = per-box)
 if EDD:
-    # same DRW on both sides, only the coherence time differs:
-    # left: long tau -> long, continuous growth phases (Eddington-limited-like)
-    # right: short tau -> brief, rapid bursts above threshold
-    TAU_A, TAU_B = 20.0, 0.25
+    # Both boxes: DRW in log L_bol with the same scatter and the SAME survey limit L_LIM.
+    # The duty cycles differ because the populations sit at different mean luminosity
+    # (massive hosts above the limit, small hosts below it); the coherence times differ:
+    # left: long tau -> long, sustained (near-Eddington) growth episodes
+    # right: short tau -> brief, rapid flares above the limit
+    TAU_A, TAU_B = 12.0, 0.25
+    SIG_DEX, L_LIM = 0.4, 0.0
+    SEED_A, TRACK_A = 72, 0
 
 BG, FG = "#3d3d3d", "#ededed"
 GREY, GREEN, STAR = "#b8b8b8", "#5fcf80", "#f7d64a"
@@ -146,8 +151,11 @@ def onoff(rlc, n, per, f, soft=0.05):
 if MODE == "drw":
     lA, lB = drw(rA_, N_HOST_A, TAU_A), drw(rB_, N_HOST_B, TAU_B)
     thrA, thrB = norm.ppf(1 - fA), norm.ppf(1 - fB)
-    if CAP_A is not None:
-        lA = np.minimum(lA, CAP_A)     # Eddington-limited (cap sits above threshold)
+    if L_LIM is not None:
+        # log L_bol = mu + SIG_DEX * x, with mu set so P(log L > L_LIM) = f_duty
+        lA = L_LIM + SIG_DEX * (lA - thrA)
+        lB = L_LIM + SIG_DEX * (lB - thrB)
+        thrA = thrB = L_LIM
 else:
     lA, lB = onoff(rA_, N_HOST_A, PER_A, fA), onoff(rB_, N_HOST_B, PER_B, fB)
     thrA = thrB = 0.5
@@ -174,24 +182,8 @@ def pick_track(l, thr, want, min_len=0.4):
             best, best_s = j, sc
     return best
 
-def pick_long(l, thr):
-    """Left host for the long-coherence scenario: on for the whole clip, with a clear slow
-    wander that stays comfortably above threshold and no net decline."""
-    v = l[t_frames >= T_QSO]
-    best, best_s = 0, -np.inf
-    for j in range(v.shape[1]):
-        on_all = (v[:, j] > thr).all()
-        wander = np.ptp(v[:, j])
-        margin = v[:, j].min() - thr
-        n = len(v)
-        drop = v[: n // 4, j].mean() - v[-n // 4 :, j].mean()     # net decline
-        sc = 10 * on_all + wander - 3 * max(0, 0.3 - margin) - 3 * max(0, drop)
-        if sc > best_s:
-            best, best_s = j, sc
-    return best
-
 if EDD and MODE == "drw":
-    trackA = pick_long(lA, thrA)
+    trackA = TRACK_A
     trackB = pick_track(lB, thrB, 4, min_len=0.1)
 else:
     trackA = (TRACK_A if (MODE == "drw" and TRACK_A is not None and TRACK_A < N_HOST_A)
@@ -222,10 +214,12 @@ def make_layer(ax, hosts):
 scA, stA = make_layer(axA, hostsA)
 scB, stB = make_layer(axB, hostsB)
 
-def lc_axes(x0, l, thr, label_thr=False, cap=None):
+def lc_axes(x0, l, thr, label_thr=False, ylim=None, label_below=False):
     ax = fig.add_axes([x0, 0.07, BOX_W, 0.13], facecolor=BG)
     v = l[t_frames >= T_QSO]
-    if MODE == "drw":
+    if ylim is not None:
+        lo, hi = ylim
+    elif MODE == "drw":
         lo, hi = min(v.min(), thr) - 0.3, max(v.max(), thr) + 0.9
     else:
         lo, hi = -0.15, 1.35
@@ -239,22 +233,28 @@ def lc_axes(x0, l, thr, label_thr=False, cap=None):
             color="#9ec5ff", va="center")
     if MODE == "drw":
         ax.axhline(thr, color="#cfcfcf", lw=1.0, ls="--")
+        if L_LIM is not None:
+            ax.set_ylabel(r"$\log L_{\rm bol}$", fontsize=11, labelpad=2)
         if label_thr:
-          ax.text(DUR - 0.1, thr + 0.08 * (hi - lo), "threshold", ha="right", va="bottom",
+          ax.text(DUR - 0.1, thr + (-0.08 if label_below else 0.08) * (hi - lo),
+                  "survey limit" if L_LIM is not None else "threshold", ha="right",
+                  va="top" if label_below else "bottom",
                 fontsize=10, color="#cfcfcf", zorder=10,
                 bbox=dict(facecolor=BG, edgecolor="none", alpha=0.85, pad=1.5))
-        if cap is not None:
-            ax.axhline(cap, color="#f39c5a", lw=1.4)
-            ax.text(DUR - 0.1, cap + 0.08 * (hi - lo), "Eddington limit", ha="right",
-                    va="bottom", fontsize=10, color="#f6b98a")
     line, = ax.plot([], [], color="#d9d9d9", lw=1.8)
     above, = ax.plot([], [], color=STAR, lw=2.2)
     dot, = ax.plot([], [], "o", ms=6, color=STAR)
     ax.set_visible(False)
     return dict(ax=ax, l=l, thr=thr, line=line, above=above, dot=dot, fill=None)
 
-LCA = lc_axes(X0A, lA[:, trackA], thrA, cap=CAP_A if MODE == "drw" else None)
-LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=True)
+YLIM = None
+if MODE == "drw" and L_LIM is not None:      # same log L_bol axis in both strips
+    _v = np.concatenate([lA[t_frames >= T_QSO, trackA], lB[t_frames >= T_QSO, trackB]])
+    _span = _v.max() - _v.min()
+    YLIM = (_v.min() - 0.1 * _span, _v.max() + 0.35 * _span)
+LCA = lc_axes(X0A, lA[:, trackA], thrA, ylim=YLIM,
+              label_thr=L_LIM is not None, label_below=True)
+LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=True, ylim=YLIM)
 
 grey = np.array(matplotlib.colors.to_rgba(GREY))
 green = np.array(matplotlib.colors.to_rgba(GREEN))
@@ -269,7 +269,7 @@ def update_box(sc, st, hosts, l, thr, i, t):
     sc.set_facecolors(cols)
     if t < T_QSO:
         return
-    x = l[i] - thr
+    x = (l[i] - thr) / SIG_DEX        # excess above the limit, in units of the scatter
     if MODE == "drw":
         a = np.clip(x / 0.25, 0, 1)
         s = 110 + 120 * np.clip(x, 0, 2)          # brighter -> bigger
@@ -299,12 +299,12 @@ def update_lc(d, i, t):
                                          color=STAR, alpha=0.25, lw=0)
 
 def add_edd_titles(cA_, cB_, y1, y2):
-    fig.text(cA_, y1, "Long, continuous growth", ha="center", fontsize=17, weight="bold")
-    fig.text(cA_, y2, r"long $\tau_{\rm DRW}$, Eddington-limited-like", ha="center", fontsize=14,
-             color="#cfcfcf")
+    fig.text(cA_, y1, "Long, sustained growth", ha="center", fontsize=17, weight="bold")
+    fig.text(cA_, y2, r"long $\tau_{\rm DRW}$: steady, near-Eddington",
+             ha="center", fontsize=14, color="#cfcfcf")
     fig.text(cB_, y1, "Short, rapid bursts", ha="center", fontsize=17, weight="bold")
-    fig.text(cB_, y2, r"short $\tau_{\rm DRW}$", ha="center", fontsize=14,
-             color="#cfcfcf")
+    fig.text(cB_, y2, r"short $\tau_{\rm DRW}$: brief flares",
+             ha="center", fontsize=14, color="#cfcfcf")
 
 # ---------------- full-slide overlay ----------------
 R0A, R0B, GAM = 11.0, 6.5, 1.8          # schematic r0 [h^-1 cMpc]
