@@ -78,7 +78,7 @@ if EDD:
     TAU_A, TAU_B = 12.0, 0.25
     SIG_DEX, L_LIM = 0.4, 0.0
     GROWTH_DEX = 0.45        # visible but modest: L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
-    SEED_A, TRACK_A = 229, 10   # host starts below the limit, then grows above it
+    SEED_A, TRACK_A = 153, 3    # host starts just below the limit, then grows above it
 
 BG, FG = "#3d3d3d", "#ededed"
 GREY, GREEN, STAR = "#b8b8b8", "#5fcf80", "#f7d64a"
@@ -192,9 +192,28 @@ def pick_track(l, thr, want, min_len=0.4):
             best, best_s = j, sc
     return best
 
+def pick_bursty(l, thr, want=7, bright=0.25):
+    """Right host for the rapid-burst scenario: several bright flares (peak at least
+    `bright` dex above the limit) spread across the clip, few faint threshold grazes."""
+    v = l[t_frames >= T_QSO]
+    n = len(v)
+    best, best_s = 0, -np.inf
+    for j in range(v.shape[1]):
+        on = v[:, j] > thr
+        o = np.concatenate([[0], on.astype(int), [0]])
+        st, en = np.where(np.diff(o) == 1)[0], np.where(np.diff(o) == -1)[0]
+        peaks = np.array([v[a:b, j].max() - thr for a, b in zip(st, en)])
+        nb_bright = int((peaks >= bright).sum()) if len(peaks) else 0
+        n_faint = len(peaks) - nb_bright
+        spread = (np.ptp(st[peaks >= bright]) / n) if nb_bright > 1 else 0
+        sc = -abs(nb_bright - want) - 0.3 * n_faint + 2 * spread
+        if sc > best_s:
+            best, best_s = j, sc
+    return best
+
 if EDD and MODE == "drw":
     trackA = TRACK_A
-    trackB = pick_track(lB, thrB, 4, min_len=0.1)
+    trackB = pick_bursty(lB, thrB)
 else:
     trackA = (TRACK_A if (MODE == "drw" and TRACK_A is not None and TRACK_A < N_HOST_A)
               else pick_track(lA, thrA, 2))
@@ -268,7 +287,7 @@ _mA = MEAN_A if (MODE == "drw" and L_LIM is not None) else None
 _mB = MEAN_B if (MODE == "drw" and L_LIM is not None) else None
 LCA = lc_axes(X0A, lA[:, trackA], thrA, ylim=YLIM, mean=_mA,
               label_thr=L_LIM is not None, label_below=True)
-LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=True, ylim=YLIM, mean=_mB)
+LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=L_LIM is None, ylim=YLIM, mean=_mB)
 
 grey = np.array(matplotlib.colors.to_rgba(GREY))
 green = np.array(matplotlib.colors.to_rgba(GREEN))
