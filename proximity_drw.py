@@ -87,8 +87,11 @@ def rp_all(y):
     return r[idx], F, Fs
 
 # ---------------- evolve ----------------
-y = np.ones((N_LOS, NR))
-RP = np.empty((NFR, N_LOS)); YS = []
+# y(r, t) does not depend on density, so one profile serves every sightline;
+# only the transmission (through Delta) differs between them.
+y = np.ones(NR)
+RP = np.empty((NFR, N_LOS)); YS = np.empty((NFR, NR))
+reb = np.zeros(N_LOS)                                # strongest smoothed-flux rebound past R_p
 nb = len(t_all) - NFR
 for j in range(len(t_all)):
     h = h_of(cumL[j]); qq = q * L_all[j]
@@ -96,21 +99,17 @@ for j in range(len(t_all)):
     y = yeq + (y - yeq) * np.exp(-(1 + qq) / T_BKG * dt_all[j])
     if j >= nb:
         i = j - nb
-        RP[i] = rp_all(y)[0]
-        YS.append(y.copy())
-YS = np.array(YS)                                    # (NFR, N_LOS, NR)
+        RP[i], _, Fs = rp_all(y)
+        YS[i] = y
+        reb = np.maximum(reb, np.where(r[None, :] > RP[i][:, None] + 0.3, Fs, 0).max(axis=1))
 med = np.median(RP, axis=1)
 lo16, hi84 = np.percentile(RP, 16, axis=1), np.percentile(RP, 84, axis=1)
 
 # displayed sightline: tracks the median, no strong rebound past R_p
-Fs_all = uniform_filter1d(np.exp(-TAU0 * Delta[None] ** 2 * YS), box, axis=2)
-reb = np.zeros(N_LOS)
-for jj in range(N_LOS):
-    m = r[None, :] > RP[:, jj, None] + 0.3
-    reb[jj] = np.max(np.where(m, Fs_all[:, jj], 0))
 score = np.mean(np.abs(RP - med[:, None]), axis=0) + 8 * np.clip(reb - 0.12, 0, None)
 k = int(np.argmin(score))
-Yk = YS[:, k]; Fk = np.exp(-TAU0 * Delta[k] ** 2 * Yk); Fks = Fs_all[:, k]; RPk = RP[:, k]
+Yk = YS; Fk = np.exp(-TAU0 * Delta[k] ** 2 * Yk); RPk = RP[:, k]
+Fks = uniform_filter1d(Fk, box, axis=1)
 NY = 50
 tex = gaussian_filter(rng.normal(size=(NY, NR)), (4, 6)); tex /= tex.std()
 Delta2 = np.exp(0.7 * (0.75 * g[k][None, :] + 0.66 * tex) - 0.5 * 0.49)
@@ -189,7 +188,8 @@ def frame(i):
 if __name__ == "__main__":
     print(f"logL range {np.ptp(logL):.2f} dex | Rp med {med.min():.2f}-{med.max():.2f} | k={k}")
     if len(sys.argv) > 1:
-        frame(int(float(sys.argv[1]) * FPS)); fig.savefig("pz_drw_still.png", facecolor=BG)
+        frame(min(max(int(float(sys.argv[1]) * FPS), 0), NFR - 1))   # t = DUR -> last frame
+        fig.savefig("pz_drw_still.png", facecolor=BG)
     else:
         FuncAnimation(fig, frame, frames=NFR, blit=False).save(
             "proximity_zone_drw.mp4",
