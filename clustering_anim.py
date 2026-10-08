@@ -16,7 +16,8 @@ Flags:
   --extreme  f_duty = 0.85 (13 hosts) vs 0.05 (220 hosts)  [default: 0.75 vs 0.15]
   --edd      as --extreme, but both boxes share one survey limit in log L_bol; the duty
              cycles come from different mean luminosities, and the DRW coherence times
-             differ: long sustained episodes (left) vs short rapid bursts (right). drw mode
+             differ: long sustained episodes (left) vs short rapid bursts (right); the mean
+             log L of both rises slowly (exponential BH growth, GROWTH_DEX). drw mode
   --info     add N_QSO / N_host counters and f_duty under each box
   --full     full-slide version: titles, counters, xi(r) panel, equations, punchline
   --crop     also write a version cropped to the two boxes + lightcurves (needs ffmpeg)
@@ -67,6 +68,7 @@ if EXTREME:
     PER_A, PER_B = 8.0, 6.0
     NH = 290
 SIG_DEX, L_LIM = 1.0, None   # DRW scatter [dex]; common detection limit (None = per-box)
+GROWTH_DEX = 0.0             # rise of the mean log L over the visible clip (exponential growth)
 if EDD:
     # Both boxes: DRW in log L_bol with the same scatter and the SAME survey limit L_LIM.
     # The duty cycles differ because the populations sit at different mean luminosity
@@ -75,6 +77,7 @@ if EDD:
     # right: short tau -> brief, rapid flares above the limit
     TAU_A, TAU_B = 12.0, 0.25
     SIG_DEX, L_LIM = 0.4, 0.0
+    GROWTH_DEX = 0.15        # modest: L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
     SEED_A, TRACK_A = 72, 0
 
 BG, FG = "#3d3d3d", "#ededed"
@@ -155,7 +158,14 @@ if MODE == "drw":
         # log L_bol = mu + SIG_DEX * x, with mu set so P(log L > L_LIM) = f_duty
         lA = L_LIM + SIG_DEX * (lA - thrA)
         lB = L_LIM + SIG_DEX * (lB - thrB)
+        muA, muB = L_LIM - SIG_DEX * thrA, L_LIM - SIG_DEX * thrB     # mean log L
         thrA = thrB = L_LIM
+        # BH growth: the mean luminosity tracks M_BH, which grows exponentially, so log L
+        # rises linearly. Centred on the middle of the clip so the time-averaged duty
+        # cycles stay at f_duty (fewer quasars at the start, more at the end).
+        trend = GROWTH_DEX * (t_frames - 0.5 * (T_QSO + DUR)) / (DUR - T_QSO)
+        lA = lA + trend[:, None]; lB = lB + trend[:, None]
+        MEAN_A, MEAN_B = muA + trend, muB + trend
 else:
     lA, lB = onoff(rA_, N_HOST_A, PER_A, fA), onoff(rB_, N_HOST_B, PER_B, fB)
     thrA = thrB = 0.5
@@ -214,8 +224,8 @@ def make_layer(ax, hosts):
 scA, stA = make_layer(axA, hostsA)
 scB, stB = make_layer(axB, hostsB)
 
-def lc_axes(x0, l, thr, label_thr=False, ylim=None, label_below=False):
-    ax = fig.add_axes([x0, 0.07, BOX_W, 0.13], facecolor=BG)
+def lc_axes(x0, l, thr, label_thr=False, ylim=None, label_below=False, mean=None):
+    ax = fig.add_axes([x0, 0.06, BOX_W, 0.14] if EDD else [x0, 0.07, BOX_W, 0.13], facecolor=BG)
     v = l[t_frames >= T_QSO]
     if ylim is not None:
         lo, hi = ylim
@@ -233,6 +243,8 @@ def lc_axes(x0, l, thr, label_thr=False, ylim=None, label_below=False):
             color="#9ec5ff", va="center")
     if MODE == "drw":
         ax.axhline(thr, color="#cfcfcf", lw=1.0, ls="--")
+        if mean is not None and GROWTH_DEX > 0:          # growing mean: M_BH(t)
+            ax.plot(t_frames, mean, color="#9be7b4", lw=1.2, ls=":", alpha=0.9)
         if L_LIM is not None:
             ax.set_ylabel(r"$\log L_{\rm bol}$", fontsize=11, labelpad=2)
         if label_thr:
@@ -252,9 +264,11 @@ if MODE == "drw" and L_LIM is not None:      # same log L_bol axis in both strip
     _v = np.concatenate([lA[t_frames >= T_QSO, trackA], lB[t_frames >= T_QSO, trackB]])
     _span = _v.max() - _v.min()
     YLIM = (_v.min() - 0.1 * _span, _v.max() + 0.35 * _span)
-LCA = lc_axes(X0A, lA[:, trackA], thrA, ylim=YLIM,
+_mA = MEAN_A if (MODE == "drw" and L_LIM is not None) else None
+_mB = MEAN_B if (MODE == "drw" and L_LIM is not None) else None
+LCA = lc_axes(X0A, lA[:, trackA], thrA, ylim=YLIM, mean=_mA,
               label_thr=L_LIM is not None, label_below=True)
-LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=True, ylim=YLIM)
+LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=True, ylim=YLIM, mean=_mB)
 
 grey = np.array(matplotlib.colors.to_rgba(GREY))
 green = np.array(matplotlib.colors.to_rgba(GREEN))
