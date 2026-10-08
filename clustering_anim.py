@@ -77,8 +77,8 @@ if EDD:
     # right: short tau -> brief, rapid flares above the limit
     TAU_A, TAU_B = 12.0, 0.25
     SIG_DEX, L_LIM = 0.4, 0.0
-    GROWTH_DEX = 0.35        # visible but modest: L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
-    SEED_A, TRACK_A = 92, 6
+    GROWTH_DEX = 0.45        # visible but modest: L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
+    SEED_A, TRACK_A = 229, 10   # host starts below the limit, then grows above it
 
 BG, FG = "#3d3d3d", "#ededed"
 GREY, GREEN, STAR = "#b8b8b8", "#5fcf80", "#f7d64a"
