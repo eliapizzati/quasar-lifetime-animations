@@ -35,18 +35,22 @@ TQ_HOLD = 1.5               # seconds held on last frame
 T_BKG = 300.0               # 1/Gamma_UVB [kyr]
 R_S = 16.0                  # r where Gamma_QSO = Gamma_UVB [pMpc]
 RMAX = 10.0                 # pMpc shown
-TAU0 = 60.0
-XHI_BKG = 1e-4
+TAU0 = 60.0                 # Lya optical-depth normalisation (mean F ~ 1% at z ~ 6)
+XHI_BKG = 1e-4              # residual H I fraction of the UVB-ionized IGM
 T0, DT_HEAT = 1.0e4, 3.0e4  # IGM temperature and He II photoheating [K]
 R_HE_10MYR = 10.0            # He III front radius at t_Q = 10 Myr [pMpc]; R ~ t^(1/3)
 W_HE = 0.35                 # front width [pMpc]
 N_LOS = 150
 
+# ---------------- palette / fonts ----------------
 BG, FG = "#3d3d3d", "#ededed"
 STAR, BLUE = "#f7d64a", "#9ec5ff"
+WHITE, SPINE = "#ffffff", "#d8d8d8"
+LAB, TICK = 21, 17          # axis-label and tick font sizes
 plt.rcParams.update({"font.family": "DejaVu Sans", "mathtext.fontset": "dejavusans",
-                     "text.color": FG, "axes.labelcolor": FG,
-                     "xtick.color": FG, "ytick.color": FG})
+                     "text.color": FG, "axes.labelcolor": WHITE,
+                     "xtick.color": WHITE, "ytick.color": WHITE,
+                     "xtick.labelsize": TICK, "ytick.labelsize": TICK})
 
 NFR = int(FPS * DUR)
 t_s = np.arange(NFR) / FPS
@@ -90,7 +94,7 @@ for i in range(NFR):
     if t_s[i] >= T_ON:
         yeq = h / (1 + q)
         y = yeq + (y - yeq) * np.exp(-(1 + q) / T_BKG * dts[i])
-    RP[i], F = rp_all(y)
+    RP[i] = rp_all(y)[0]
 RP[t_s < T_ON] = 0.0
 
 # displayed sightline: background R_p small, final R_p close to the median
@@ -120,14 +124,9 @@ RPk = RP[:, k]
 NY = 50
 tex = gaussian_filter(rng.normal(size=(NY, NR)), (4, 6)); tex /= tex.std()
 Delta2 = np.exp(0.7 * (0.75 * g[k][None, :] + 0.66 * tex) - 0.5 * 0.49)
-
+Fks = uniform_filter1d(Fk, box, axis=1)        # ~1 pMpc boxcar: R_p is defined on this
 
 # ---------------- figure ----------------
-Fks = uniform_filter1d(Fk, box, axis=1)        # ~1 pMpc boxcar: R_p is defined on this
-WHITE, SPINE = "#ffffff", "#d8d8d8"
-LAB, TICK = 21, 17
-plt.rcParams.update({"axes.labelcolor": WHITE, "xtick.color": WHITE, "ytick.color": WHITE,
-                     "xtick.labelsize": TICK, "ytick.labelsize": TICK})
 fig = plt.figure(figsize=(12.8, 7.2), dpi=150, facecolor=BG)
 X0, W = 0.085, 0.825
 

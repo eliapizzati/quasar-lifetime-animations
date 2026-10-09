@@ -1,37 +1,40 @@
 """
 Quasar clustering and the duty cycle.
 
-Two boxes share the same clustered dark-matter halo field and show the same mean number
-of active quasars. Left: quasars live only in the most massive (most strongly clustered)
-haloes, so each host must be active most of the time (high duty cycle). Right: quasars
-live in many more, less massive haloes, so each is active only rarely (low duty cycle).
-Only the clustering strength tells the two apart.
+Two boxes share the same clustered dark-matter halo field and show the same mean number of
+active quasars. Left: quasars live only in the most massive (most strongly clustered) haloes,
+so each host is active most of the time (high duty cycle). Right: quasars live in many more,
+less massive haloes, so each is active only rarely (low duty cycle). Only the clustering
+strength tells the two apart.
 
-Lightcurve modes (first argument):
-  onoff   simple on/off episodes
-  drw     damped random walk in log L; a host is a quasar while log L > threshold,
-          with the threshold set so the time above it equals f_duty
+Lightcurve mode (positional, default drw):
+  onoff   toy on/off episodes
+  drw     damped random walk in log L; a host is a quasar while log L is above a threshold
 
-Flags:
-  --extreme  f_duty = 0.85 (13 hosts) vs 0.05 (220 hosts)  [default: 0.75 vs 0.15]
-  --edd      as --extreme, but both boxes share one survey limit in log L_bol; the duty
-             cycles come from different mean luminosities, and the DRW coherence times
-             differ: long sustained episodes (left) vs short rapid bursts (right); the mean
+Scenarios (pick at most one; default: f_duty 0.75 vs 0.15):
+  --extreme  f_duty = 0.85 (13 hosts) vs 0.05 (220 hosts)
+  --edd      as --extreme, with one survey limit in log L_bol shared by both boxes (the duty
+             cycles come from different mean luminosities) and very different DRW coherence
+             times: long, sustained episodes (left) vs short, rapid bursts (right). The mean
              log L of both rises slowly (exponential BH growth, GROWTH_DEX). drw mode
-  --bulb     as --edd, but the left hosts are toy lightbulbs (off, then on at constant L)
-             while the right keeps the bursty short-tau DRW
-  --light    white-background palette
+  --bulb     as --edd but static (no growth), and the left hosts are toy lightbulbs: long
+             episodes at constant L, short fully-off gaps. drw mode
+
+Output options:
   --info     add N_QSO / N_host counters and f_duty under each box
   --full     full-slide version: titles, counters, xi(r) panel, equations, punchline
-  --crop     also write a version cropped to the two boxes + lightcurves (needs ffmpeg)
+  --crop     also write a version cropped to the boxes + lightcurves (needs ffmpeg)
+  --light    white-background palette
+
+A time in seconds (positional) writes a still PNG of that frame instead of a video.
 
 Examples:
   python clustering_anim.py onoff --extreme --info --crop
-  python clustering_anim.py drw --extreme --info --crop
-  python clustering_anim.py drw 12 --extreme --info      # still frame at t = 12 s
-  python clustering_anim.py 12                           # same, default mode (drw)
+  python clustering_anim.py drw --bulb --full --light
+  python clustering_anim.py drw 12 --edd --info          # still frame at t = 12 s
 """
-import sys
+import argparse
+import subprocess
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -39,68 +42,84 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 from scipy.stats import norm
 
-FULL = "--full" in sys.argv          # full slide: titles, counters, xi(r), equations
-INFO = "--info" in sys.argv          # boxes + lightcurves + N_QSO/N_host/f_duty text only
-EXTREME = "--extreme" in sys.argv    # f_duty 0.85 vs 0.05
-CROP = "--crop" in sys.argv          # also write a cropped (boxes + lightcurves) video
-EDD = "--edd" in sys.argv            # long Eddington-limited episodes vs short rapid bursts
-BULB = "--bulb" in sys.argv          # as --edd, but left hosts are on/off lightbulbs
-LIGHT_THEME = "--light" in sys.argv  # white-background palette
-EDD = EDD or BULB
-EXTREME = EXTREME or EDD
-sys.argv = [a for a in sys.argv
-            if a not in ("--full", "--info", "--extreme", "--crop", "--edd", "--bulb", "--light")]
-MODE, STILL_T = "drw", None         # positionals: lightcurve mode and/or still time [s]
-for _a in sys.argv[1:]:
+# ---------------- command line ----------------
+_p = argparse.ArgumentParser(description=__doc__,
+                             formatter_class=argparse.RawDescriptionHelpFormatter)
+_p.add_argument("pos", nargs="*", metavar="onoff|drw|TIME",
+                help="lightcurve mode and/or a time in seconds for a still frame")
+for _flag in ("extreme", "edd", "bulb", "info", "full", "crop", "light"):
+    _p.add_argument(f"--{_flag}", action="store_true")
+ARGS = _p.parse_args()
+
+MODE, STILL_T = "drw", None
+for _a in ARGS.pos:
     if _a in ("onoff", "drw"):
         MODE = _a
     else:
         try:
             STILL_T = float(_a)
         except ValueError:
-            sys.exit(f"unknown argument {_a!r}: expected onoff|drw, a time in seconds, "
-                     "or --extreme/--edd/--bulb/--light/--info/--full/--crop")
-SEED_FIELD, SEED_A, SEED_B = 7, 45, 21
-TRACK_A = 12      # host shown in the left lightcurve strip (DRW mode; None = auto-pick)
+            _p.error(f"unknown argument {_a!r}: expected onoff, drw or a time in seconds")
+
+SCENARIO = ("bulb" if ARGS.bulb else "edd" if ARGS.edd else
+            "extreme" if ARGS.extreme else "default")
+EXTREME = SCENARIO != "default"            # 0.85 / 0.05 duty cycles
+EDD = SCENARIO in ("edd", "bulb")          # shared survey limit, long vs short tau_DRW
+BULB = SCENARIO == "bulb"                  # left hosts are lightbulbs, no growth
+FULL, INFO, CROP, LIGHT_THEME = ARGS.full, ARGS.info, ARGS.crop, ARGS.light
 
 # ---------------- knobs ----------------
-N_QSO = 12            # mean number of visible quasars (both boxes)
-N_HOST_A = 16         # left: most massive haloes only   -> f_duty = 0.75
-N_HOST_B = 80         # right: top-80 haloes by mass     -> f_duty = 0.15
-TAU_A, TAU_B = 3.0, 1.2    # DRW damping times (animation seconds)
-PER_A, PER_B = 6.0, 2.5    # on/off cycle periods (animation seconds)
-NH = 210
+SEED_FIELD, SEED_A, SEED_B = 7, 45, 21
+TRACK_A = 12               # host shown in the left lightcurve strip (drw mode; None = auto)
+N_QSO = 12                 # mean number of visible quasars (both boxes)
+N_HOST_A = 16              # left: most massive haloes only   -> f_duty = 0.75
+N_HOST_B = 80              # right: top-80 haloes by mass     -> f_duty = 0.15
+NH = 210                   # haloes in the box
+TAU_A, TAU_B = 3.0, 1.2    # DRW damping times [animation s]
+PER_A, PER_B = 6.0, 2.5    # on/off cycle periods [animation s]
+SIG_DEX, L_LIM = 1.0, None # DRW scatter [dex]; common survey limit (None = per-box threshold)
+GROWTH_DEX = 0.0           # rise of the mean log L over the visible clip
 if EXTREME:
     N_QSO, N_HOST_A, N_HOST_B = 11, 13, 220     # f_duty = 0.85 and 0.05
     PER_A, PER_B = 8.0, 6.0
     NH = 290
-SIG_DEX, L_LIM = 1.0, None   # DRW scatter [dex]; common detection limit (None = per-box)
-GROWTH_DEX = 0.0             # rise of the mean log L over the visible clip (exponential growth)
 if EDD:
-    # Both boxes: DRW in log L_bol with the same scatter and the SAME survey limit L_LIM.
-    # The duty cycles differ because the populations sit at different mean luminosity
-    # (massive hosts above the limit, small hosts below it); the coherence times differ:
-    # left: long tau -> long, sustained (near-Eddington) growth episodes
-    # right: short tau -> brief, rapid flares above the limit
+    # Same scatter and the SAME survey limit L_LIM in both boxes: the duty cycles differ
+    # because massive hosts sit above the limit on average and small hosts below it.
     TAU_A, TAU_B = 12.0, 0.25
     SIG_DEX, L_LIM = 0.4, 0.0
-    GROWTH_DEX = 0.45        # visible but modest: L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
-    SEED_A, TRACK_A = 153, 3    # host starts just below the limit, then grows above it
+    GROWTH_DEX = 0.45      # L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
+    SEED_A, TRACK_A = 153, 3   # left host starts just below the limit, then grows above it
 if BULB:
-    GROWTH_DEX = 0.0            # --bulb is static: no growth trend in either box
+    GROWTH_DEX = 0.0       # static
 PER_BULB = 24.0                 # --bulb: on/off period [s]; on for f_duty * PER_BULB
 BULB_ON, BULB_OFF = 0.35, -0.9  # --bulb: on / off levels in log L_bol relative to the limit
 
+TITLES = {   # scenario -> (left title, left subtitle, right title, right subtitle)
+    "default": ("Large halos, high duty cycle", "quasars stay on",
+                "Small halos, low duty cycle", "quasars flicker"),
+    "edd": ("Long, sustained growth", r"long $\tau_{\rm DRW}$: steady, near-Eddington",
+            "Short, rapid bursts", r"short $\tau_{\rm DRW}$: brief flares"),
+    "bulb": ("Long, steady episodes", "few massive hosts, active most of the time",
+             "Short, rapid bursts", "many small hosts, rarely active"),
+}
+TITLES["extreme"] = TITLES["default"]
+
+# schematic correlation functions for the --full panel [h^-1 cMpc]
+R0A, R0B, GAM = 11.0, 4.5 if EXTREME else 6.5, 1.8
+
+# ---------------- palette ----------------
 if LIGHT_THEME:
-    # white slide: dark ink for text, deeper green / amber (validated for CVD separation
-    # on white), dark star outline because amber on white is low contrast
+    # white slide: dark ink for text, deeper green / amber (CVD-checked on white),
+    # dark star outline because amber on white is low contrast
     BG, FG, MUTED = "#ffffff", "#1f1f1f", "#5c5c5c"
     GREY, GREEN, LIGHT = "#c8c8c8", "#199e70", "#7cc9a8"
     STAR, STAR_EDGE, LINE_ON = "#eda100", "#5c3f00", "#c98a00"
     BOXFACE, SPINE, ACCENT = "#f7f7f5", "#8c8c8c", "#2a78d6"
     OFFLINE, GUIDE, MEANLINE = "#9a9a9a", "#8a8a8a", "#199e70"
     INK_COUNT, INK_PUNCH = "#1f1f1f", "#1f1f1f"
-    INK_FA, INK_FB = "#1f1f1f", "#1f1f1f"         # duty-cycle text in ink on white
+    INK_FA, INK_FB = "#1f1f1f", "#1f1f1f"
+    BOX_LW, STAR_LW, LINE_LW = 2.5, 0.8, 2.4
 else:
     BG, FG, MUTED = "#3d3d3d", "#ededed", "#cfcfcf"
     GREY, GREEN, LIGHT = "#b8b8b8", "#5fcf80", "#9be7b4"
@@ -109,17 +128,22 @@ else:
     OFFLINE, GUIDE, MEANLINE = "#d9d9d9", "#8a8a8a", "#9be7b4"
     INK_COUNT, INK_PUNCH = "#f7d64a", "#f7d64a"
     INK_FA, INK_FB = GREEN, LIGHT
+    BOX_LW, STAR_LW, LINE_LW = 4, 0.6, 2.2
 plt.rcParams.update({"font.family": "DejaVu Sans", "mathtext.fontset": "dejavusans",
                      "text.color": FG, "axes.labelcolor": FG,
                      "xtick.color": FG, "ytick.color": FG})
 
+# ---------------- timeline ----------------
 FPS, DUR = 30, 20.0
 NFR = int(FPS * DUR)
-T_FIELD = (0.0, 1.5)
-T_HOST = (2.0, 3.5)
-T_QSO = 4.0
 DT = 1.0 / FPS
 t_frames = np.arange(NFR) * DT
+T_FIELD = (0.0, 1.5)       # haloes fade in
+T_HOST = (2.0, 3.5)        # hosts turn green
+T_QSO = 4.0                # quasars switch on, lightcurves start
+T_XI = (11.0, 13.5)        # --full: xi(r) drawn
+T_EQ1, T_EQ2, T_EQ3, T_PUNCH = 13.5, 15.0, 16.5, 18.0
+COUNT_EVERY = 6 if EDD else 1   # frames between counter refreshes (fast flicker stays legible)
 
 def ease(t, t0, t1):
     x = np.clip((t - t0) / (t1 - t0), 0, 1)
@@ -143,7 +167,7 @@ rad = 0.009 + 0.032 * (logM / logM.max()) ** 1.2
 bias = 0.3 + 4.0 * (logM / logM.max())
 
 pos = np.zeros((NH, 2))
-for i in range(NH):
+for i in range(NH):        # biased rejection sampling, no overlaps
     for _ in range(20000):
         p = rng.uniform(0.03, 0.97, 2)
         d = delta[int(p[0] * NG) % NG, int(p[1] * NG) % NG]
@@ -163,6 +187,7 @@ rA_ = np.random.default_rng(SEED_A)
 rB_ = np.random.default_rng(SEED_B)
 
 def drw(rlc, n, tau, burn=40.0):
+    """Unit-variance damped random walk (OU process), sampled at the frame times."""
     nb = int(burn / DT)
     a = np.exp(-DT / tau); s = np.sqrt(1 - a * a)
     x = rlc.normal(size=n)
@@ -174,35 +199,42 @@ def drw(rlc, n, tau, burn=40.0):
     return out
 
 def onoff(rlc, n, per, f, soft=0.05):
+    """Smoothed square waves (~1 on, ~0 off), on for a fraction f of each period."""
     ph = (np.arange(n) + rlc.uniform(0, 0.3, n)) / n
     rlc.shuffle(ph)
     x = np.mod((t_frames[:, None] - T_QSO) / per + ph[None, :], 1.0)
-    return 0.5 * (1 + np.tanh((f - x) / (soft / per)))   # ~1 on, ~0 off
+    return 0.5 * (1 + np.tanh((f - x) / (soft / per)))
 
+MEAN_A = MEAN_B = None     # mean log L of each population (drawn when it grows)
 if MODE == "drw":
     lA, lB = drw(rA_, N_HOST_A, TAU_A), drw(rB_, N_HOST_B, TAU_B)
-    thrA, thrB = norm.ppf(1 - fA), norm.ppf(1 - fB)
+    thrA, thrB = norm.ppf(1 - fA), norm.ppf(1 - fB)       # time above = f_duty
     if L_LIM is not None:
-        # log L_bol = mu + SIG_DEX * x, with mu set so P(log L > L_LIM) = f_duty
+        # log L_bol = mu + SIG_DEX * x, with mu set so that P(log L > L_LIM) = f_duty
         lA = L_LIM + SIG_DEX * (lA - thrA)
         lB = L_LIM + SIG_DEX * (lB - thrB)
-        muA, muB = L_LIM - SIG_DEX * thrA, L_LIM - SIG_DEX * thrB     # mean log L
+        muA, muB = L_LIM - SIG_DEX * thrA, L_LIM - SIG_DEX * thrB
         thrA = thrB = L_LIM
-        # BH growth: the mean luminosity tracks M_BH, which grows exponentially, so log L
-        # rises linearly. Centred on the middle of the clip so the time-averaged duty
-        # cycles stay at f_duty (fewer quasars at the start, more at the end).
+        # BH growth: the mean tracks M_BH, which grows exponentially, so log L rises
+        # linearly. Centred on mid-clip so the time-averaged duty cycles stay at f_duty.
         trend = GROWTH_DEX * (t_frames - 0.5 * (T_QSO + DUR)) / (DUR - T_QSO)
         lA = lA + trend[:, None]; lB = lB + trend[:, None]
         MEAN_A, MEAN_B = muA + trend, muB + trend
     if BULB:
-        # left: toy lightbulb in log L_bol. Long on-episodes at constant luminosity
-        # above the survey limit, short fully-off gaps; phases spread over the period.
+        # left: toy lightbulb in log L_bol, long on-episodes at constant luminosity above
+        # the survey limit and short fully-off gaps, phases spread over the period
         sA = onoff(rA_, N_HOST_A, PER_BULB, fA, soft=0.12)
         lA = BULB_OFF + (BULB_ON - BULB_OFF) * sA
         MEAN_A = None
 else:
     lA, lB = onoff(rA_, N_HOST_A, PER_A, fA), onoff(rB_, N_HOST_B, PER_B, fB)
     thrA = thrB = 0.5
+
+# ---------------- which host to show in each lightcurve strip ----------------
+def runs(on):
+    """Start / end indices of the True runs in a boolean array."""
+    o = np.concatenate([[0], on.astype(int), [0]])
+    return np.where(np.diff(o) == 1)[0], np.where(np.diff(o) == -1)[0]
 
 def pick_track(l, thr, want, min_len=0.4):
     """Host whose visible stretch shows its duty cycle cleanly: the right number of
@@ -213,8 +245,7 @@ def pick_track(l, thr, want, min_len=0.4):
     n = len(v)
     best, best_s = 0, -np.inf
     for j in range(v.shape[1]):
-        o = np.concatenate([[0], on[:, j].astype(int), [0]])
-        st, en = np.where(np.diff(o) == 1)[0], np.where(np.diff(o) == -1)[0]
+        st, en = runs(on[:, j])
         long_ = (en - st) * DT >= min_len
         nb = long_.sum()
         short = (~long_).sum()
@@ -227,15 +258,13 @@ def pick_track(l, thr, want, min_len=0.4):
     return best
 
 def pick_bursty(l, thr, want=7, bright=0.25):
-    """Right host for the rapid-burst scenario: several bright flares (peak at least
-    `bright` dex above the limit) spread across the clip, few faint threshold grazes."""
+    """Rapid-burst host: several bright flares (peak at least `bright` dex above the
+    limit) spread across the clip, and few faint threshold grazes."""
     v = l[t_frames >= T_QSO]
     n = len(v)
     best, best_s = 0, -np.inf
     for j in range(v.shape[1]):
-        on = v[:, j] > thr
-        o = np.concatenate([[0], on.astype(int), [0]])
-        st, en = np.where(np.diff(o) == 1)[0], np.where(np.diff(o) == -1)[0]
+        st, en = runs(v[:, j] > thr)
         peaks = np.array([v[a:b, j].max() - thr for a, b in zip(st, en)])
         nb_bright = int((peaks >= bright).sum()) if len(peaks) else 0
         n_faint = len(peaks) - nb_bright
@@ -246,7 +275,7 @@ def pick_bursty(l, thr, want=7, bright=0.25):
     return best
 
 def pick_switch_on(l, thr, t_on=2.5):
-    """Left lightbulb host: off when the strip starts, switches on once ~t_on s after the
+    """Lightbulb host: off when the strip starts, switches on once ~t_on s after the
     quasars appear, and stays on to the end."""
     v = l[t_frames >= T_QSO - 0.5]
     best, best_s = 0, -np.inf
@@ -261,43 +290,45 @@ def pick_switch_on(l, thr, t_on=2.5):
             best, best_s = j, sc
     return best
 
-if BULB and MODE == "drw":
-    trackA = pick_switch_on(lA, thrA)
-    trackB = pick_bursty(lB, thrB)
-elif EDD and MODE == "drw":
-    trackA = TRACK_A
-    trackB = pick_bursty(lB, thrB)
+if MODE == "drw" and BULB:
+    trackA, trackB = pick_switch_on(lA, thrA), pick_bursty(lB, thrB)
+elif MODE == "drw" and EDD:
+    trackA, trackB = TRACK_A, pick_bursty(lB, thrB)
 else:
     trackA = (TRACK_A if (MODE == "drw" and TRACK_A is not None and TRACK_A < N_HOST_A)
               else pick_track(lA, thrA, 2))
     trackB = pick_track(lB, thrB, 2 if EXTREME else 4)
 
-# ---------------- figure ----------------
+# ---------------- figure: halo boxes ----------------
 fig = plt.figure(figsize=(12.8, 7.2), dpi=150, facecolor=BG)
 BOX_W = 0.30
+X0A, X0B = 0.035, 0.375
+CX_A, CX_B = X0A + BOX_W / 2, X0B + BOX_W / 2      # box centres (for text)
+
 def box_axes(x0):
     ax = fig.add_axes([x0, 0.30, BOX_W, BOX_W * 12.8 / 7.2], facecolor=BOXFACE)
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
     ax.set_xticks([]); ax.set_yticks([])
     for s in ax.spines.values():
-        s.set_color(SPINE); s.set_linewidth(2.5 if LIGHT_THEME else 4)
+        s.set_color(SPINE); s.set_linewidth(BOX_LW)
     return ax
 
-X0A, X0B = 0.035, 0.375
 axA, axB = box_axes(X0A), box_axes(X0B)
 sizes = np.pi * (rad * BOX_W * 12.8 * 72) ** 2
 
 def make_layer(ax, hosts):
     sc = ax.scatter(*pos.T, s=sizes, c=GREY, lw=0, zorder=1)
     st = ax.scatter(*pos[hosts].T, s=np.zeros(len(hosts)), marker="*", c=STAR,
-                    edgecolors=STAR_EDGE, lw=0.8 if LIGHT_THEME else 0.6, zorder=3)
+                    edgecolors=STAR_EDGE, lw=STAR_LW, zorder=3)
     return sc, st
 
 scA, stA = make_layer(axA, hostsA)
 scB, stB = make_layer(axB, hostsB)
 
+# ---------------- figure: lightcurve strips ----------------
 def lc_axes(x0, l, thr, label_thr=False, ylim=None, label_below=False, mean=None):
-    ax = fig.add_axes([x0, 0.06, BOX_W, 0.14] if EDD else [x0, 0.07, BOX_W, 0.13], facecolor=BG)
+    ax = fig.add_axes([x0, 0.06, BOX_W, 0.14] if EDD else [x0, 0.07, BOX_W, 0.13],
+                      facecolor=BG)
     v = l[t_frames >= T_QSO]
     if ylim is not None:
         lo, hi = ylim
@@ -315,33 +346,94 @@ def lc_axes(x0, l, thr, label_thr=False, ylim=None, label_below=False, mean=None
             color=ACCENT, va="center")
     if MODE == "drw":
         ax.axhline(thr, color=MUTED, lw=1.0, ls="--")
-        if mean is not None and GROWTH_DEX > 0:          # growing mean: M_BH(t)
+        if mean is not None and GROWTH_DEX > 0:          # growing mean ~ M_BH(t)
             ax.plot(t_frames, mean, color=MEANLINE, lw=1.2, ls=":", alpha=0.9)
         if L_LIM is not None:
             ax.set_ylabel(r"$\log L_{\rm bol}$", fontsize=11, labelpad=2)
         if label_thr:
-          ax.text(DUR - 0.1, thr + (-0.08 if label_below else 0.08) * (hi - lo),
-                  "survey limit" if L_LIM is not None else "threshold", ha="right",
-                  va="top" if label_below else "bottom",
-                fontsize=10, color=MUTED, zorder=10,
-                bbox=dict(facecolor=BG, edgecolor="none", alpha=0.85, pad=1.5))
+            ax.text(DUR - 0.1, thr + (-0.08 if label_below else 0.08) * (hi - lo),
+                    "survey limit" if L_LIM is not None else "threshold", ha="right",
+                    va="top" if label_below else "bottom", fontsize=10, color=MUTED,
+                    zorder=10, bbox=dict(facecolor=BG, edgecolor="none", alpha=0.85, pad=1.5))
     line, = ax.plot([], [], color=OFFLINE, lw=1.8)
-    above, = ax.plot([], [], color=LINE_ON, lw=2.4 if LIGHT_THEME else 2.2)
+    above, = ax.plot([], [], color=LINE_ON, lw=LINE_LW)
     dot, = ax.plot([], [], "o", ms=6, color=LINE_ON)
     ax.set_visible(False)
     return dict(ax=ax, l=l, thr=thr, line=line, above=above, dot=dot, fill=None)
 
 YLIM = None
-if MODE == "drw" and L_LIM is not None:      # same log L_bol axis in both strips
+if MODE == "drw" and L_LIM is not None:      # one log L_bol axis shared by both strips
     _v = np.concatenate([lA[t_frames >= T_QSO, trackA], lB[t_frames >= T_QSO, trackB]])
     _span = _v.max() - _v.min()
     YLIM = (_v.min() - 0.1 * _span, _v.max() + 0.35 * _span)
-_mA = MEAN_A if (MODE == "drw" and L_LIM is not None and not BULB) else None
-_mB = MEAN_B if (MODE == "drw" and L_LIM is not None) else None
-LCA = lc_axes(X0A, lA[:, trackA], thrA, ylim=YLIM, mean=_mA,
+# with a shared limit, label it once (left strip, below the line); otherwise label the right
+LCA = lc_axes(X0A, lA[:, trackA], thrA, ylim=YLIM, mean=MEAN_A,
               label_thr=L_LIM is not None, label_below=True)
-LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=L_LIM is None, ylim=YLIM, mean=_mB)
+LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=L_LIM is None, ylim=YLIM, mean=MEAN_B)
 
+# ---------------- figure: text overlays ----------------
+def add_titles(y1, y2):
+    tA, sA_, tB, sB_ = TITLES[SCENARIO]
+    sub = 14 if EDD else 13
+    fig.text(CX_A, y1, tA, ha="center", fontsize=17, weight="bold")
+    fig.text(CX_A, y2, sA_, ha="center", fontsize=sub, color=MUTED)
+    fig.text(CX_B, y1, tB, ha="center", fontsize=17, weight="bold")
+    fig.text(CX_B, y2, sB_, ha="center", fontsize=sub, color=MUTED)
+
+def duty_label(f, sym):
+    """f_duty text; a clip average when growth makes the instantaneous value drift."""
+    if GROWTH_DEX > 0:
+        return rf"$\langle f_{{\rm duty}}\rangle = {f:.2f}$"
+    return rf"$f_{{\rm duty}} {sym} {f:.2f}$"
+
+if FULL:
+    add_titles(0.925, 0.88)
+    cntA = fig.text(CX_A, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
+    cntB = fig.text(CX_B, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
+    eq3A = fig.text(CX_A, 0.215, duty_label(fA, r"\approx"), ha="center", fontsize=15,
+                    color=INK_FA, alpha=0)
+    eq3B = fig.text(CX_B, 0.215, duty_label(fB, r"\approx"), ha="center", fontsize=15,
+                    color=INK_FB, alpha=0)
+
+    axX = fig.add_axes([0.765, 0.50, 0.215, 0.36], facecolor=BG)
+    rr = np.logspace(-0.3, 1.6, 200)
+    axX.set_xscale("log"); axX.set_yscale("log")
+    axX.set_xlim(rr[0], rr[-1]); axX.set_ylim(0.03, 300)
+    for s_ in axX.spines.values():
+        s_.set_color(SPINE)
+    axX.tick_params(labelsize=9, colors=FG)
+    axX.set_xlabel(r"$r\ [h^{-1}\,\mathrm{cMpc}]$", fontsize=11)
+    axX.set_ylabel(r"$\xi_{\rm QQ}(r)$", fontsize=13)
+    axX.axhline(1, color=GUIDE, lw=1, ls=":")
+    xiA, = axX.plot([], [], color=GREEN, lw=2.6, label="large halos")
+    xiB, = axX.plot([], [], color=LIGHT, lw=2.6, ls="--", label="small halos")
+    r0l = [axX.axvline(R0A, color=GREEN, lw=1, alpha=0),
+           axX.axvline(R0B, color=LIGHT, lw=1, alpha=0)]
+    r0t = [axX.text(R0A * 1.08, 0.05, r"$r_0$", color=GREEN, fontsize=12, alpha=0),
+           axX.text(R0B * 1.08, 0.05, r"$r_0$", color=LIGHT, fontsize=12, alpha=0)]
+    axX.legend(frameon=False, fontsize=9, loc="upper right", labelcolor=FG)
+    axX.set_visible(False)
+
+    eq1 = fig.text(0.872, 0.385,
+                   r"$r_0 \rightarrow b(M) \rightarrow M_{\rm host} \rightarrow n_{\rm host}$",
+                   ha="center", fontsize=14, alpha=0)
+    eq2 = fig.text(0.872, 0.285,
+                   r"$f_{\rm duty} = \dfrac{n_{\rm QSO}}{n_{\rm host}} \sim \dfrac{t_{\rm Q}}{t_{\rm H}}$",
+                   ha="center", fontsize=16, alpha=0)
+    punch = fig.text(0.872, 0.13, "Same number of quasars.\nOnly clustering\ntells them apart.",
+                     ha="center", fontsize=14, weight="bold", color=INK_PUNCH, alpha=0,
+                     linespacing=1.4)
+elif INFO:
+    if EDD:
+        add_titles(0.905, 0.862)
+    cntA = fig.text(CX_A, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
+    cntB = fig.text(CX_B, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
+    eq3A = fig.text(CX_A, 0.205, duty_label(fA, "="), ha="center", fontsize=18,
+                    color=INK_FA, alpha=0)
+    eq3B = fig.text(CX_B, 0.205, duty_label(fB, "="), ha="center", fontsize=18,
+                    color=INK_FB, alpha=0)
+
+# ---------------- per-frame updates ----------------
 grey = np.array(matplotlib.colors.to_rgba(GREY))
 green = np.array(matplotlib.colors.to_rgba(GREEN))
 ystar = np.array(matplotlib.colors.to_rgba(STAR))
@@ -384,104 +476,19 @@ def update_lc(d, i, t):
         d["fill"] = d["ax"].fill_between(tt, d["thr"], yy, where=yy > d["thr"],
                                          color=LINE_ON, alpha=0.25, lw=0)
 
-def add_edd_titles(cA_, cB_, y1, y2):
-    if BULB:
-        fig.text(cA_, y1, "Long, steady episodes", ha="center", fontsize=17, weight="bold")
-        fig.text(cA_, y2, "few massive hosts, active most of the time",
-                 ha="center", fontsize=14, color=MUTED)
-        fig.text(cB_, y1, "Short, rapid bursts", ha="center", fontsize=17, weight="bold")
-        fig.text(cB_, y2, "many small hosts, rarely active",
-                 ha="center", fontsize=14, color=MUTED)
-        return
-    else:
-        fig.text(cA_, y1, "Long, sustained growth", ha="center", fontsize=17, weight="bold")
-        fig.text(cA_, y2, r"long $\tau_{\rm DRW}$: steady, near-Eddington",
-                 ha="center", fontsize=14, color=MUTED)
-    fig.text(cB_, y1, "Short, rapid bursts", ha="center", fontsize=17, weight="bold")
-    fig.text(cB_, y2, r"short $\tau_{\rm DRW}$: brief flares",
-             ha="center", fontsize=14, color=MUTED)
-
-# ---------------- full-slide overlay ----------------
-R0A, R0B, GAM = 11.0, 6.5, 1.8          # schematic r0 [h^-1 cMpc]
-if EXTREME:
-    R0B = 4.5                             # hosts reach much lower masses
-T_XI = (11.0, 13.5)
-T_EQ1, T_EQ2, T_EQ3, T_PUNCH = 13.5, 15.0, 16.5, 18.0
-COUNT_EVERY = 6 if EDD else 1     # frames between counter refreshes
-if FULL:
-    cA_, cB_ = X0A + BOX_W / 2, X0B + BOX_W / 2
-    if EDD:
-        add_edd_titles(cA_, cB_, 0.925, 0.88)
-    else:
-        fig.text(cA_, 0.925, "Large halos, high duty cycle", ha="center", fontsize=17, weight="bold")
-        fig.text(cA_, 0.88, "quasars stay on", ha="center", fontsize=13, color=MUTED)
-        fig.text(cB_, 0.925, "Small halos, low duty cycle", ha="center", fontsize=17, weight="bold")
-        fig.text(cB_, 0.88, "quasars flicker", ha="center", fontsize=13, color=MUTED)
-    cntA = fig.text(cA_, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
-    cntB = fig.text(cB_, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
-    eq3A = fig.text(cA_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if GROWTH_DEX > 0 else
-                                 rf"$f_{{\rm duty}} \approx {fA:.2f}$"), ha="center",
-                    fontsize=15, color=INK_FA, alpha=0)
-    eq3B = fig.text(cB_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if GROWTH_DEX > 0 else
-                                 rf"$f_{{\rm duty}} \approx {fB:.2f}$"), ha="center",
-                    fontsize=15, color=INK_FB, alpha=0)
-
-    axX = fig.add_axes([0.765, 0.50, 0.215, 0.36], facecolor=BG)
-    rr = np.logspace(-0.3, 1.6, 200)
-    axX.set_xscale("log"); axX.set_yscale("log")
-    axX.set_xlim(rr[0], rr[-1]); axX.set_ylim(0.03, 300)
-    for s_ in axX.spines.values():
-        s_.set_color(SPINE)
-    axX.tick_params(labelsize=9, colors=FG)
-    axX.set_xlabel(r"$r\ [h^{-1}\,\mathrm{cMpc}]$", fontsize=11)
-    axX.set_ylabel(r"$\xi_{\rm QQ}(r)$", fontsize=13)
-    axX.axhline(1, color=GUIDE, lw=1, ls=":")
-    xiA, = axX.plot([], [], color=GREEN, lw=2.6, label="large halos")
-    xiB, = axX.plot([], [], color=LIGHT, lw=2.6, ls="--", label="small halos")
-    r0l = [axX.axvline(R0A, color=GREEN, lw=1, alpha=0),
-           axX.axvline(R0B, color=LIGHT, lw=1, alpha=0)]
-    r0t = [axX.text(R0A * 1.08, 0.05, r"$r_0$", color=GREEN, fontsize=12, alpha=0),
-           axX.text(R0B * 1.08, 0.05, r"$r_0$", color=LIGHT, fontsize=12, alpha=0)]
-    axX.legend(frameon=False, fontsize=9, loc="upper right", labelcolor=FG)
-    axX.set_visible(False)
-
-    eq1 = fig.text(0.872, 0.385,
-                   r"$r_0 \rightarrow b(M) \rightarrow M_{\rm host} \rightarrow n_{\rm host}$",
-                   ha="center", fontsize=14, alpha=0)
-    eq2 = fig.text(0.872, 0.285,
-                   r"$f_{\rm duty} = \dfrac{n_{\rm QSO}}{n_{\rm host}} \sim \dfrac{t_{\rm Q}}{t_{\rm H}}$",
-                   ha="center", fontsize=16, alpha=0)
-    punch = fig.text(0.872, 0.13, "Same number of quasars.\nOnly clustering\ntells them apart.",
-                     ha="center", fontsize=14, weight="bold", color=INK_PUNCH, alpha=0,
-                     linespacing=1.4)
-
-if INFO and not FULL:
-    cA_, cB_ = X0A + BOX_W / 2, X0B + BOX_W / 2
-    if EDD:
-        add_edd_titles(cA_, cB_, 0.905, 0.862)
-    cntA = fig.text(cA_, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
-    cntB = fig.text(cB_, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
-    eq3A = fig.text(cA_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if GROWTH_DEX > 0 else
-                                 rf"$f_{{\rm duty}} = {fA:.2f}$"), ha="center",
-                    fontsize=18, color=INK_FA, alpha=0)
-    eq3B = fig.text(cB_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if GROWTH_DEX > 0 else
-                                 rf"$f_{{\rm duty}} = {fB:.2f}$"), ha="center",
-                    fontsize=18, color=INK_FB, alpha=0)
-
-def update_info(i, t):
+def update_counts(i, t, word, width):
     if t >= T_QSO:
         j = i - (i % COUNT_EVERY)
         onA = int((lA[j] > thrA).sum()); onB = int((lB[j] > thrB).sum())
-        cntA.set_text(rf"$N_{{\rm QSO}}$ = {onA:2d}   /   $N_{{\rm host}}$ = {N_HOST_A}")
-        cntB.set_text(rf"$N_{{\rm QSO}}$ = {onB:2d}   /   $N_{{\rm host}}$ = {N_HOST_B}")
+        cntA.set_text(rf"$N_{{\rm QSO}}${word} = {onA:{width}}   /   $N_{{\rm host}}$ = {N_HOST_A}")
+        cntB.set_text(rf"$N_{{\rm QSO}}${word} = {onB:{width}}   /   $N_{{\rm host}}$ = {N_HOST_B}")
+
+def update_info(i, t):
+    update_counts(i, t, "", "2d")
     a = ease(t, T_QSO + 1.0, T_QSO + 2.0); eq3A.set_alpha(a); eq3B.set_alpha(a)
 
 def update_overlay(i, t):
-    if t >= T_QSO:
-        j = i - (i % COUNT_EVERY)
-        onA = int((lA[j] > thrA).sum()); onB = int((lB[j] > thrB).sum())
-        cntA.set_text(rf"$N_{{\rm QSO}}$ on = {onA}   /   $N_{{\rm host}}$ = {N_HOST_A}")
-        cntB.set_text(rf"$N_{{\rm QSO}}$ on = {onB}   /   $N_{{\rm host}}$ = {N_HOST_B}")
+    update_counts(i, t, " on", "")
     if t >= T_XI[0]:
         axX.set_visible(True)
         n = max(2, int(ease(t, *T_XI) * len(rr)))
@@ -506,25 +513,31 @@ def frame(i):
         update_info(i, t)
     return []
 
+# ---------------- output ----------------
+TAG = (MODE + ("_full" if FULL else "_info" if INFO else "")
+       + {"default": "", "extreme": "_extreme", "edd": "_edd", "bulb": "_bulb"}[SCENARIO]
+       + ("_light" if LIGHT_THEME else ""))
+# ffmpeg crop (w:h:x:y in px of the 1920x1080 frame): boxes + strips (+ titles for --edd/--bulb)
+CROP_GEOM = "1320:1040:0:40" if EDD else "1320:930:20:150"
+
 if __name__ == "__main__":
     if STILL_T is not None:
         frame(min(max(int(STILL_T * FPS), 0), NFR - 1))   # t = DUR -> last frame
-        fig.savefig(f"still_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_bulb' if BULB else ('_edd' if EDD else ('_extreme' if EXTREME else ''))}{'_light' if LIGHT_THEME else ''}.png", facecolor=BG)
+        fig.savefig(f"still_{TAG}.png", facecolor=BG)
     else:
         nA = (lA[t_frames >= T_QSO] > thrA).sum(1)
         nB = (lB[t_frames >= T_QSO] > thrB).sum(1)
         print(f"[{MODE}] f_duty A={fA:.2f} B={fB:.2f} | N_on A {nA.mean():.1f}±{nA.std():.1f}"
               f"  B {nB.mean():.1f}±{nB.std():.1f}")
-        out = f"clustering_dutycycle_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_bulb' if BULB else ('_edd' if EDD else ('_extreme' if EXTREME else ''))}{'_light' if LIGHT_THEME else ''}.mp4"
+        out = f"clustering_dutycycle_{TAG}.mp4"
         FuncAnimation(fig, frame, frames=NFR, blit=False).save(
             out,
             writer=FFMpegWriter(fps=FPS, bitrate=6000, codec="libx264",
                                 extra_args=["-pix_fmt", "yuv420p"]),
             savefig_kwargs={"facecolor": BG})
         if CROP and not FULL:
-            import subprocess
             cropped = out.replace("clustering_dutycycle_", "clustering_panels_").replace("_info", "")
             subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", out,
-                            "-vf", "crop=1320:1040:0:40" if EDD else "crop=1320:930:20:150", "-c:v", "libx264",
+                            "-vf", f"crop={CROP_GEOM}", "-c:v", "libx264",
                             "-pix_fmt", "yuv420p", "-b:v", "6M", cropped], check=True)
             print("wrote", cropped)
