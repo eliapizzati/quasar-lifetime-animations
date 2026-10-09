@@ -387,10 +387,10 @@ def update_lc(d, i, t):
 def add_edd_titles(cA_, cB_, y1, y2):
     if BULB:
         fig.text(cA_, y1, "Long, steady episodes", ha="center", fontsize=17, weight="bold")
-        fig.text(cA_, y2, "few massive hosts, on for long stretches",
+        fig.text(cA_, y2, "few massive hosts, active most of the time",
                  ha="center", fontsize=14, color=MUTED)
         fig.text(cB_, y1, "Short, rapid bursts", ha="center", fontsize=17, weight="bold")
-        fig.text(cB_, y2, "many small hosts, brief flares",
+        fig.text(cB_, y2, "many small hosts, rarely active",
                  ha="center", fontsize=14, color=MUTED)
         return
     else:
