@@ -86,6 +86,8 @@ if EDD:
     SIG_DEX, L_LIM = 0.4, 0.0
     GROWTH_DEX = 0.45        # visible but modest: L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
     SEED_A, TRACK_A = 153, 3    # host starts just below the limit, then grows above it
+if BULB:
+    GROWTH_DEX = 0.0            # --bulb is static: no growth trend in either box
 PER_BULB = 24.0                 # --bulb: on/off period [s]; on for f_duty * PER_BULB
 BULB_ON, BULB_OFF = 0.35, -0.9  # --bulb: on / off levels in log L_bol relative to the limit
 
@@ -385,8 +387,12 @@ def update_lc(d, i, t):
 def add_edd_titles(cA_, cB_, y1, y2):
     if BULB:
         fig.text(cA_, y1, "Long, steady episodes", ha="center", fontsize=17, weight="bold")
-        fig.text(cA_, y2, "toy lightbulb: on at constant L",
+        fig.text(cA_, y2, "few massive hosts, on for long stretches",
                  ha="center", fontsize=14, color=MUTED)
+        fig.text(cB_, y1, "Short, rapid bursts", ha="center", fontsize=17, weight="bold")
+        fig.text(cB_, y2, "many small hosts, brief flares",
+                 ha="center", fontsize=14, color=MUTED)
+        return
     else:
         fig.text(cA_, y1, "Long, sustained growth", ha="center", fontsize=17, weight="bold")
         fig.text(cA_, y2, r"long $\tau_{\rm DRW}$: steady, near-Eddington",
@@ -413,10 +419,10 @@ if FULL:
         fig.text(cB_, 0.88, "quasars flicker", ha="center", fontsize=13, color=MUTED)
     cntA = fig.text(cA_, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
     cntB = fig.text(cB_, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
-    eq3A = fig.text(cA_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if EDD else
+    eq3A = fig.text(cA_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if GROWTH_DEX > 0 else
                                  rf"$f_{{\rm duty}} \approx {fA:.2f}$"), ha="center",
                     fontsize=15, color=INK_FA, alpha=0)
-    eq3B = fig.text(cB_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if EDD else
+    eq3B = fig.text(cB_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if GROWTH_DEX > 0 else
                                  rf"$f_{{\rm duty}} \approx {fB:.2f}$"), ha="center",
                     fontsize=15, color=INK_FB, alpha=0)
 
@@ -455,10 +461,10 @@ if INFO and not FULL:
         add_edd_titles(cA_, cB_, 0.905, 0.862)
     cntA = fig.text(cA_, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
     cntB = fig.text(cB_, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
-    eq3A = fig.text(cA_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if EDD else
+    eq3A = fig.text(cA_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if GROWTH_DEX > 0 else
                                  rf"$f_{{\rm duty}} = {fA:.2f}$"), ha="center",
                     fontsize=18, color=INK_FA, alpha=0)
-    eq3B = fig.text(cB_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if EDD else
+    eq3B = fig.text(cB_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if GROWTH_DEX > 0 else
                                  rf"$f_{{\rm duty}} = {fB:.2f}$"), ha="center",
                     fontsize=18, color=INK_FB, alpha=0)
 
