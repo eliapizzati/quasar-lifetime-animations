@@ -18,6 +18,9 @@ Flags:
              cycles come from different mean luminosities, and the DRW coherence times
              differ: long sustained episodes (left) vs short rapid bursts (right); the mean
              log L of both rises slowly (exponential BH growth, GROWTH_DEX). drw mode
+  --bulb     as --edd, but the left hosts are toy lightbulbs (off, then on at constant L)
+             while the right keeps the bursty short-tau DRW
+  --light    white-background palette
   --info     add N_QSO / N_host counters and f_duty under each box
   --full     full-slide version: titles, counters, xi(r) panel, equations, punchline
   --crop     also write a version cropped to the two boxes + lightcurves (needs ffmpeg)
@@ -41,8 +44,12 @@ INFO = "--info" in sys.argv          # boxes + lightcurves + N_QSO/N_host/f_duty
 EXTREME = "--extreme" in sys.argv    # f_duty 0.85 vs 0.05
 CROP = "--crop" in sys.argv          # also write a cropped (boxes + lightcurves) video
 EDD = "--edd" in sys.argv            # long Eddington-limited episodes vs short rapid bursts
+BULB = "--bulb" in sys.argv          # as --edd, but left hosts are on/off lightbulbs
+LIGHT_THEME = "--light" in sys.argv  # white-background palette
+EDD = EDD or BULB
 EXTREME = EXTREME or EDD
-sys.argv = [a for a in sys.argv if a not in ("--full", "--info", "--extreme", "--crop", "--edd")]
+sys.argv = [a for a in sys.argv
+            if a not in ("--full", "--info", "--extreme", "--crop", "--edd", "--bulb", "--light")]
 MODE, STILL_T = "drw", None         # positionals: lightcurve mode and/or still time [s]
 for _a in sys.argv[1:]:
     if _a in ("onoff", "drw"):
@@ -52,7 +59,7 @@ for _a in sys.argv[1:]:
             STILL_T = float(_a)
         except ValueError:
             sys.exit(f"unknown argument {_a!r}: expected onoff|drw, a time in seconds, "
-                     "or --extreme/--edd/--info/--full/--crop")
+                     "or --extreme/--edd/--bulb/--light/--info/--full/--crop")
 SEED_FIELD, SEED_A, SEED_B = 7, 45, 21
 TRACK_A = 12      # host shown in the left lightcurve strip (DRW mode; None = auto-pick)
 
@@ -79,11 +86,30 @@ if EDD:
     SIG_DEX, L_LIM = 0.4, 0.0
     GROWTH_DEX = 0.45        # visible but modest: L ~ M_BH ~ exp(t / t_Salpeter) -> log L rises linearly
     SEED_A, TRACK_A = 153, 3    # host starts just below the limit, then grows above it
+PER_BULB = 24.0                 # --bulb: on/off period [s]; on for f_duty * PER_BULB
+BULB_ON, BULB_OFF = 0.35, -0.9  # --bulb: on / off levels in log L_bol relative to the limit
 
-BG, FG = "#3d3d3d", "#ededed"
-GREY, GREEN, STAR = "#b8b8b8", "#5fcf80", "#f7d64a"
+if LIGHT_THEME:
+    # white slide: dark ink for text, deeper green / amber (validated for CVD separation
+    # on white), dark star outline because amber on white is low contrast
+    BG, FG, MUTED = "#ffffff", "#1f1f1f", "#5c5c5c"
+    GREY, GREEN, LIGHT = "#c8c8c8", "#199e70", "#7cc9a8"
+    STAR, STAR_EDGE, LINE_ON = "#eda100", "#5c3f00", "#c98a00"
+    BOXFACE, SPINE, ACCENT = "#f7f7f5", "#8c8c8c", "#2a78d6"
+    OFFLINE, GUIDE, MEANLINE = "#9a9a9a", "#8a8a8a", "#199e70"
+    INK_COUNT, INK_PUNCH = "#1f1f1f", "#1f1f1f"
+    INK_FA, INK_FB = "#1f1f1f", "#1f1f1f"         # duty-cycle text in ink on white
+else:
+    BG, FG, MUTED = "#3d3d3d", "#ededed", "#cfcfcf"
+    GREY, GREEN, LIGHT = "#b8b8b8", "#5fcf80", "#9be7b4"
+    STAR, STAR_EDGE, LINE_ON = "#f7d64a", "#8a6d00", "#f7d64a"
+    BOXFACE, SPINE, ACCENT = "#f1f1f1", "#9a9a9a", "#9ec5ff"
+    OFFLINE, GUIDE, MEANLINE = "#d9d9d9", "#8a8a8a", "#9be7b4"
+    INK_COUNT, INK_PUNCH = "#f7d64a", "#f7d64a"
+    INK_FA, INK_FB = GREEN, LIGHT
 plt.rcParams.update({"font.family": "DejaVu Sans", "mathtext.fontset": "dejavusans",
-                     "text.color": FG, "axes.labelcolor": FG})
+                     "text.color": FG, "axes.labelcolor": FG,
+                     "xtick.color": FG, "ytick.color": FG})
 
 FPS, DUR = 30, 20.0
 NFR = int(FPS * DUR)
@@ -166,6 +192,12 @@ if MODE == "drw":
         trend = GROWTH_DEX * (t_frames - 0.5 * (T_QSO + DUR)) / (DUR - T_QSO)
         lA = lA + trend[:, None]; lB = lB + trend[:, None]
         MEAN_A, MEAN_B = muA + trend, muB + trend
+    if BULB:
+        # left: toy lightbulb in log L_bol. Long on-episodes at constant luminosity
+        # above the survey limit, short fully-off gaps; phases spread over the period.
+        sA = onoff(rA_, N_HOST_A, PER_BULB, fA, soft=0.12)
+        lA = BULB_OFF + (BULB_ON - BULB_OFF) * sA
+        MEAN_A = None
 else:
     lA, lB = onoff(rA_, N_HOST_A, PER_A, fA), onoff(rB_, N_HOST_B, PER_B, fB)
     thrA = thrB = 0.5
@@ -211,7 +243,26 @@ def pick_bursty(l, thr, want=7, bright=0.25):
             best, best_s = j, sc
     return best
 
-if EDD and MODE == "drw":
+def pick_switch_on(l, thr, t_on=2.5):
+    """Left lightbulb host: off when the strip starts, switches on once ~t_on s after the
+    quasars appear, and stays on to the end."""
+    v = l[t_frames >= T_QSO - 0.5]
+    best, best_s = 0, -np.inf
+    for j in range(v.shape[1]):
+        on = v[:, j] > thr
+        ups = np.where(np.diff(on.astype(int)) == 1)[0]
+        downs = np.where(np.diff(on.astype(int)) == -1)[0]
+        if on[0] or len(ups) != 1 or len(downs):
+            continue
+        sc = -abs(ups[0] * DT - 0.5 - t_on)
+        if sc > best_s:
+            best, best_s = j, sc
+    return best
+
+if BULB and MODE == "drw":
+    trackA = pick_switch_on(lA, thrA)
+    trackB = pick_bursty(lB, thrB)
+elif EDD and MODE == "drw":
     trackA = TRACK_A
     trackB = pick_bursty(lB, thrB)
 else:
@@ -223,11 +274,11 @@ else:
 fig = plt.figure(figsize=(12.8, 7.2), dpi=150, facecolor=BG)
 BOX_W = 0.30
 def box_axes(x0):
-    ax = fig.add_axes([x0, 0.30, BOX_W, BOX_W * 12.8 / 7.2], facecolor="#f1f1f1")
+    ax = fig.add_axes([x0, 0.30, BOX_W, BOX_W * 12.8 / 7.2], facecolor=BOXFACE)
     ax.set_xlim(0, 1); ax.set_ylim(0, 1); ax.set_aspect("equal")
     ax.set_xticks([]); ax.set_yticks([])
     for s in ax.spines.values():
-        s.set_color("#9a9a9a"); s.set_linewidth(4)
+        s.set_color(SPINE); s.set_linewidth(2.5 if LIGHT_THEME else 4)
     return ax
 
 X0A, X0B = 0.035, 0.375
@@ -237,7 +288,7 @@ sizes = np.pi * (rad * BOX_W * 12.8 * 72) ** 2
 def make_layer(ax, hosts):
     sc = ax.scatter(*pos.T, s=sizes, c=GREY, lw=0, zorder=1)
     st = ax.scatter(*pos[hosts].T, s=np.zeros(len(hosts)), marker="*", c=STAR,
-                    edgecolors="#8a6d00", lw=0.6, zorder=3)
+                    edgecolors=STAR_EDGE, lw=0.8 if LIGHT_THEME else 0.6, zorder=3)
     return sc, st
 
 scA, stA = make_layer(axA, hostsA)
@@ -256,25 +307,25 @@ def lc_axes(x0, l, thr, label_thr=False, ylim=None, label_below=False, mean=None
     ax.set_xticks([]); ax.set_yticks([])
     for s_ in ["top", "right", "left"]:
         ax.spines[s_].set_visible(False)
-    ax.spines["bottom"].set_color("#9a9a9a")
+    ax.spines["bottom"].set_color(SPINE)
     ax.set_xlabel("time", fontsize=11, labelpad=2)
     ax.text(T_QSO - 0.4, hi - 0.12 * (hi - lo), "one host:", fontsize=10,
-            color="#9ec5ff", va="center")
+            color=ACCENT, va="center")
     if MODE == "drw":
-        ax.axhline(thr, color="#cfcfcf", lw=1.0, ls="--")
+        ax.axhline(thr, color=MUTED, lw=1.0, ls="--")
         if mean is not None and GROWTH_DEX > 0:          # growing mean: M_BH(t)
-            ax.plot(t_frames, mean, color="#9be7b4", lw=1.2, ls=":", alpha=0.9)
+            ax.plot(t_frames, mean, color=MEANLINE, lw=1.2, ls=":", alpha=0.9)
         if L_LIM is not None:
             ax.set_ylabel(r"$\log L_{\rm bol}$", fontsize=11, labelpad=2)
         if label_thr:
           ax.text(DUR - 0.1, thr + (-0.08 if label_below else 0.08) * (hi - lo),
                   "survey limit" if L_LIM is not None else "threshold", ha="right",
                   va="top" if label_below else "bottom",
-                fontsize=10, color="#cfcfcf", zorder=10,
+                fontsize=10, color=MUTED, zorder=10,
                 bbox=dict(facecolor=BG, edgecolor="none", alpha=0.85, pad=1.5))
-    line, = ax.plot([], [], color="#d9d9d9", lw=1.8)
-    above, = ax.plot([], [], color=STAR, lw=2.2)
-    dot, = ax.plot([], [], "o", ms=6, color=STAR)
+    line, = ax.plot([], [], color=OFFLINE, lw=1.8)
+    above, = ax.plot([], [], color=LINE_ON, lw=2.4 if LIGHT_THEME else 2.2)
+    dot, = ax.plot([], [], "o", ms=6, color=LINE_ON)
     ax.set_visible(False)
     return dict(ax=ax, l=l, thr=thr, line=line, above=above, dot=dot, fill=None)
 
@@ -283,7 +334,7 @@ if MODE == "drw" and L_LIM is not None:      # same log L_bol axis in both strip
     _v = np.concatenate([lA[t_frames >= T_QSO, trackA], lB[t_frames >= T_QSO, trackB]])
     _span = _v.max() - _v.min()
     YLIM = (_v.min() - 0.1 * _span, _v.max() + 0.35 * _span)
-_mA = MEAN_A if (MODE == "drw" and L_LIM is not None) else None
+_mA = MEAN_A if (MODE == "drw" and L_LIM is not None and not BULB) else None
 _mB = MEAN_B if (MODE == "drw" and L_LIM is not None) else None
 LCA = lc_axes(X0A, lA[:, trackA], thrA, ylim=YLIM, mean=_mA,
               label_thr=L_LIM is not None, label_below=True)
@@ -292,7 +343,7 @@ LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=L_LIM is None, ylim=YLIM, mean
 grey = np.array(matplotlib.colors.to_rgba(GREY))
 green = np.array(matplotlib.colors.to_rgba(GREEN))
 ystar = np.array(matplotlib.colors.to_rgba(STAR))
-yedge = np.array(matplotlib.colors.to_rgba("#8a6d00"))
+yedge = np.array(matplotlib.colors.to_rgba(STAR_EDGE))
 
 def update_box(sc, st, hosts, l, thr, i, t):
     a_f, a_h = ease(t, *T_FIELD), ease(t, *T_HOST)
@@ -324,20 +375,25 @@ def update_lc(d, i, t):
     cut = d["thr"] if MODE == "drw" else 0.03
     d["above"].set_data(tt, np.where(yy > cut, yy, np.nan))
     d["dot"].set_data([t], [d["l"][i]])
-    d["dot"].set_color(STAR if d["l"][i] > d["thr"] else "#d9d9d9")
+    d["dot"].set_color(LINE_ON if d["l"][i] > d["thr"] else OFFLINE)
     if MODE == "drw":
         if d["fill"] is not None:
             d["fill"].remove()
         d["fill"] = d["ax"].fill_between(tt, d["thr"], yy, where=yy > d["thr"],
-                                         color=STAR, alpha=0.25, lw=0)
+                                         color=LINE_ON, alpha=0.25, lw=0)
 
 def add_edd_titles(cA_, cB_, y1, y2):
-    fig.text(cA_, y1, "Long, sustained growth", ha="center", fontsize=17, weight="bold")
-    fig.text(cA_, y2, r"long $\tau_{\rm DRW}$: steady, near-Eddington",
-             ha="center", fontsize=14, color="#cfcfcf")
+    if BULB:
+        fig.text(cA_, y1, "Long, steady episodes", ha="center", fontsize=17, weight="bold")
+        fig.text(cA_, y2, "toy lightbulb: on at constant L",
+                 ha="center", fontsize=14, color=MUTED)
+    else:
+        fig.text(cA_, y1, "Long, sustained growth", ha="center", fontsize=17, weight="bold")
+        fig.text(cA_, y2, r"long $\tau_{\rm DRW}$: steady, near-Eddington",
+                 ha="center", fontsize=14, color=MUTED)
     fig.text(cB_, y1, "Short, rapid bursts", ha="center", fontsize=17, weight="bold")
     fig.text(cB_, y2, r"short $\tau_{\rm DRW}$: brief flares",
-             ha="center", fontsize=14, color="#cfcfcf")
+             ha="center", fontsize=14, color=MUTED)
 
 # ---------------- full-slide overlay ----------------
 R0A, R0B, GAM = 11.0, 6.5, 1.8          # schematic r0 [h^-1 cMpc]
@@ -345,7 +401,6 @@ if EXTREME:
     R0B = 4.5                             # hosts reach much lower masses
 T_XI = (11.0, 13.5)
 T_EQ1, T_EQ2, T_EQ3, T_PUNCH = 13.5, 15.0, 16.5, 18.0
-LIGHT = "#9be7b4"
 COUNT_EVERY = 6 if EDD else 1     # frames between counter refreshes
 if FULL:
     cA_, cB_ = X0A + BOX_W / 2, X0B + BOX_W / 2
@@ -353,28 +408,28 @@ if FULL:
         add_edd_titles(cA_, cB_, 0.925, 0.88)
     else:
         fig.text(cA_, 0.925, "Large halos, high duty cycle", ha="center", fontsize=17, weight="bold")
-        fig.text(cA_, 0.88, "quasars stay on", ha="center", fontsize=13, color="#cfcfcf")
+        fig.text(cA_, 0.88, "quasars stay on", ha="center", fontsize=13, color=MUTED)
         fig.text(cB_, 0.925, "Small halos, low duty cycle", ha="center", fontsize=17, weight="bold")
-        fig.text(cB_, 0.88, "quasars flicker", ha="center", fontsize=13, color="#cfcfcf")
-    cntA = fig.text(cA_, 0.258, "", ha="center", fontsize=14, color=STAR)
-    cntB = fig.text(cB_, 0.258, "", ha="center", fontsize=14, color=STAR)
+        fig.text(cB_, 0.88, "quasars flicker", ha="center", fontsize=13, color=MUTED)
+    cntA = fig.text(cA_, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
+    cntB = fig.text(cB_, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
     eq3A = fig.text(cA_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if EDD else
                                  rf"$f_{{\rm duty}} \approx {fA:.2f}$"), ha="center",
-                    fontsize=15, color=GREEN, alpha=0)
+                    fontsize=15, color=INK_FA, alpha=0)
     eq3B = fig.text(cB_, 0.215, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if EDD else
                                  rf"$f_{{\rm duty}} \approx {fB:.2f}$"), ha="center",
-                    fontsize=15, color=LIGHT, alpha=0)
+                    fontsize=15, color=INK_FB, alpha=0)
 
     axX = fig.add_axes([0.765, 0.50, 0.215, 0.36], facecolor=BG)
     rr = np.logspace(-0.3, 1.6, 200)
     axX.set_xscale("log"); axX.set_yscale("log")
     axX.set_xlim(rr[0], rr[-1]); axX.set_ylim(0.03, 300)
     for s_ in axX.spines.values():
-        s_.set_color("#9a9a9a")
+        s_.set_color(SPINE)
     axX.tick_params(labelsize=9, colors=FG)
     axX.set_xlabel(r"$r\ [h^{-1}\,\mathrm{cMpc}]$", fontsize=11)
     axX.set_ylabel(r"$\xi_{\rm QQ}(r)$", fontsize=13)
-    axX.axhline(1, color="#8a8a8a", lw=1, ls=":")
+    axX.axhline(1, color=GUIDE, lw=1, ls=":")
     xiA, = axX.plot([], [], color=GREEN, lw=2.6, label="large halos")
     xiB, = axX.plot([], [], color=LIGHT, lw=2.6, ls="--", label="small halos")
     r0l = [axX.axvline(R0A, color=GREEN, lw=1, alpha=0),
@@ -391,21 +446,21 @@ if FULL:
                    r"$f_{\rm duty} = \dfrac{n_{\rm QSO}}{n_{\rm host}} \sim \dfrac{t_{\rm Q}}{t_{\rm H}}$",
                    ha="center", fontsize=16, alpha=0)
     punch = fig.text(0.872, 0.13, "Same number of quasars.\nOnly clustering\ntells them apart.",
-                     ha="center", fontsize=14, weight="bold", color=STAR, alpha=0,
+                     ha="center", fontsize=14, weight="bold", color=INK_PUNCH, alpha=0,
                      linespacing=1.4)
 
 if INFO and not FULL:
     cA_, cB_ = X0A + BOX_W / 2, X0B + BOX_W / 2
     if EDD:
         add_edd_titles(cA_, cB_, 0.905, 0.862)
-    cntA = fig.text(cA_, 0.25, "", ha="center", fontsize=17, color=STAR)
-    cntB = fig.text(cB_, 0.25, "", ha="center", fontsize=17, color=STAR)
+    cntA = fig.text(cA_, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
+    cntB = fig.text(cB_, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
     eq3A = fig.text(cA_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fA:.2f}$" if EDD else
                                  rf"$f_{{\rm duty}} = {fA:.2f}$"), ha="center",
-                    fontsize=18, color=GREEN, alpha=0)
+                    fontsize=18, color=INK_FA, alpha=0)
     eq3B = fig.text(cB_, 0.205, (rf"$\langle f_{{\rm duty}}\rangle = {fB:.2f}$" if EDD else
                                  rf"$f_{{\rm duty}} = {fB:.2f}$"), ha="center",
-                    fontsize=18, color=LIGHT, alpha=0)
+                    fontsize=18, color=INK_FB, alpha=0)
 
 def update_info(i, t):
     if t >= T_QSO:
@@ -448,13 +503,13 @@ def frame(i):
 if __name__ == "__main__":
     if STILL_T is not None:
         frame(min(max(int(STILL_T * FPS), 0), NFR - 1))   # t = DUR -> last frame
-        fig.savefig(f"still_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_edd' if EDD else ('_extreme' if EXTREME else '')}.png", facecolor=BG)
+        fig.savefig(f"still_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_bulb' if BULB else ('_edd' if EDD else ('_extreme' if EXTREME else ''))}{'_light' if LIGHT_THEME else ''}.png", facecolor=BG)
     else:
         nA = (lA[t_frames >= T_QSO] > thrA).sum(1)
         nB = (lB[t_frames >= T_QSO] > thrB).sum(1)
         print(f"[{MODE}] f_duty A={fA:.2f} B={fB:.2f} | N_on A {nA.mean():.1f}±{nA.std():.1f}"
               f"  B {nB.mean():.1f}±{nB.std():.1f}")
-        out = f"clustering_dutycycle_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_edd' if EDD else ('_extreme' if EXTREME else '')}.mp4"
+        out = f"clustering_dutycycle_{MODE}{'_full' if FULL else ('_info' if INFO else '')}{'_bulb' if BULB else ('_edd' if EDD else ('_extreme' if EXTREME else ''))}{'_light' if LIGHT_THEME else ''}.mp4"
         FuncAnimation(fig, frame, frames=NFR, blit=False).save(
             out,
             writer=FFMpegWriter(fps=FPS, bitrate=6000, codec="libx264",
