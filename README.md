@@ -34,13 +34,16 @@ Only the clustering strength tells the two apart.
 
 <img src="docs/proximity_tq.png" width="640">
 
-[`proximity_zone_tq.mp4`](videos/proximity_zone_tq.mp4): the quasar switches on and stays
-on. $R_{\rm p}$ grows with $t_{\rm Q}$ until H I reaches equilibrium (~$10^5$ yr), plateaus,
+[`proximity_zone_tq.mp4`](videos/proximity_zone_tq.mp4)
+(white slide: [`proximity_zone_tq_light.mp4`](videos/proximity_zone_tq_light.mp4)):
+the quasar switches on and stays on. $R_{\rm p}$ grows with $t_{\rm Q}$ until H I reaches equilibrium (~$10^5$ yr), plateaus,
 then grows again as the He II photoheating front passes.
 
 <img src="docs/proximity_drw.png" width="640">
 
-[`proximity_zone_drw.mp4`](videos/proximity_zone_drw.mp4): a flickering (DRW) quasar.
+[`proximity_zone_drw.mp4`](videos/proximity_zone_drw.mp4)
+(white slide: [`proximity_zone_drw_light.mp4`](videos/proximity_zone_drw_light.mp4)):
+a flickering (DRW) quasar.
 $R_{\rm p}$ follows a lagged, smoothed copy of $L(t)$.
 
 ## Other clustering variants
@@ -68,6 +71,7 @@ python clustering_anim.py drw --bulb --full --light         # full slide, white 
 python clustering_anim.py --help                            # all scenarios and options
 python proximity_tq.py
 python proximity_drw.py
+python proximity_tq.py --light     # white background (all three scripts take --light)
 python proximity_tq.py 10          # any script + a time in seconds -> still PNG of that frame
 ```
 

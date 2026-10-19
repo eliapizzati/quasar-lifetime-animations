@@ -18,6 +18,8 @@ python clustering_anim.py drw   --edd --full
 # proximity zones
 python proximity_tq.py
 python proximity_drw.py
+python proximity_tq.py --light
+python proximity_drw.py --light
 
 # keep the deliverables, drop the uncropped --info intermediates
 mkdir -p videos

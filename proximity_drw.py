@@ -15,6 +15,7 @@ because the heated zone reaches ~10 pMpc in the bright state.
 
   python proximity_drw.py        -> proximity_zone_drw.mp4
   python proximity_drw.py 10     -> still at t = 10 s
+  add --light for a white-background version (proximity_zone_drw_light.mp4)
 """
 import sys
 import numpy as np
@@ -43,9 +44,21 @@ R_HE_10MYR = 10.0           # He III front radius after 1e4 kyr of emission at <
 W_HE = 0.35
 N_LOS = 150
 
-BG, FG = "#3d3d3d", "#ededed"
-STAR, BLUE = "#f7d64a", "#9ec5ff"
-WHITE, SPINE = "#ffffff", "#d8d8d8"
+LIGHT_THEME = "--light" in sys.argv     # white-background palette
+ARGS = [a for a in sys.argv[1:] if a != "--light"]
+SUFFIX = "_light" if LIGHT_THEME else ""
+if LIGHT_THEME:
+    # white slide: dark ink, amber quasar with a dark outline, darker amber (>= 3:1 on white)
+    # for the R_p marker / luminosity curve, blue R_p history (CVD-checked against the amber)
+    BG, FG = "#ffffff", "#1f1f1f"
+    STAR, BLUE = "#eda100", "#2a78d6"
+    WHITE, SPINE = "#1f1f1f", "#8c8c8c"        # WHITE = main ink (labels, smoothed flux)
+    MARK, RAW, STAR_EDGE = "#b07800", "#9a9a9a", "#5c3f00"
+else:
+    BG, FG = "#3d3d3d", "#ededed"
+    STAR, BLUE = "#f7d64a", "#9ec5ff"
+    WHITE, SPINE = "#ffffff", "#d8d8d8"
+    MARK, RAW, STAR_EDGE = STAR, "#a9a9a9", "#8a6d00"
 LAB, TICK = 21, 17
 plt.rcParams.update({"font.family": "DejaVu Sans", "mathtext.fontset": "dejavusans",
                      "text.color": WHITE, "axes.labelcolor": WHITE,
@@ -143,7 +156,7 @@ cb = fig.colorbar(imH, cax=cax, ticks=[-6, -5, -4])
 cb.outline.set_edgecolor(SPINE); cb.ax.tick_params(labelsize=15, colors=WHITE)
 cb.set_label(r"$\log x_{\rm HI}$", fontsize=19, color=WHITE)
 glow = axS.scatter([0.5 * XLO], [0.5], s=0, c=STAR, alpha=0.25, lw=0, zorder=4, clip_on=False)
-qso = axS.scatter([0.5 * XLO], [0.5], s=500, marker="*", c=STAR, ec="#8a6d00", lw=0.8,
+qso = axS.scatter([0.5 * XLO], [0.5], s=500, marker="*", c=STAR, ec=STAR_EDGE, lw=0.8,
                   zorder=5, clip_on=False)
 
 axF = fig.add_axes([X0, 0.50, W, 0.25], facecolor=BG); style(axF)
@@ -153,19 +166,19 @@ axF.set_xticks(np.arange(0, RMAX + 0.1, 2)); axF.set_yticks([0, 0.5, 1])
 axF.set_xlabel("distance from quasar [pMpc]", fontsize=LAB, labelpad=3)
 axF.set_ylabel(r"Ly$\alpha$ flux", fontsize=LAB)
 axF.axhline(0.1, color=SPINE, lw=1.0, ls=":")
-fline, = axF.plot([], [], color="#a9a9a9", lw=1.0)
+fline, = axF.plot([], [], color=RAW, lw=1.0)
 sline, = axF.plot([], [], color=WHITE, lw=2.6)
 ffill = [None]
-rpl, = axF.plot([0, 0], [-0.05, 1.0], color=STAR, lw=2.6)
-rpt = axF.text(0, 1.0, r"$R_{\rm p}$", color=STAR, fontsize=24, ha="left", va="bottom")
+rpl, = axF.plot([0, 0], [-0.05, 1.0], color=MARK, lw=2.6)
+rpt = axF.text(0, 1.0, r"$R_{\rm p}$", color=MARK, fontsize=24, ha="left", va="bottom")
 
 # lightcurve + R_p history, shared time axis
 axL = fig.add_axes([X0, 0.255, W, 0.12], facecolor=BG); style(axL)
 axL.set_xlim(0, WINDOW); axL.set_xticklabels([])
 axL.set_ylim(logL.min() - 0.15, logL.max() + 0.15)
 axL.set_yticks([]); axL.set_ylabel(r"$\log L$", fontsize=LAB)
-lline, = axL.plot([], [], color=STAR, lw=2.6)
-ldot, = axL.plot([], [], "o", color=STAR, ms=9)
+lline, = axL.plot([], [], color=MARK, lw=2.6)
+ldot, = axL.plot([], [], "o", color=MARK, ms=9)
 
 axR = fig.add_axes([X0, 0.095, W, 0.15], facecolor=BG); style(axR)
 axR.set_xlim(0, WINDOW)
@@ -197,12 +210,12 @@ if __name__ == "__main__":
     print(f"logL range {np.ptp(logL):.2f} dex | Rp med {med.min():.2f}-{med.max():.2f} | k={k}"
           f" | He III front {Rh[0]:.1f}-{Rh[-1]:.1f} pMpc | never below 10% within RMAX:"
           f" {(RP >= r[-1]).mean():.1%} of sightline-frames")
-    if len(sys.argv) > 1:
-        frame(min(max(int(float(sys.argv[1]) * FPS), 0), NFR - 1))   # t = DUR -> last frame
-        fig.savefig("pz_drw_still.png", facecolor=BG)
+    if ARGS:
+        frame(min(max(int(float(ARGS[0]) * FPS), 0), NFR - 1))   # t = DUR -> last frame
+        fig.savefig(f"pz_drw_still{SUFFIX}.png", facecolor=BG)
     else:
         FuncAnimation(fig, frame, frames=NFR, blit=False).save(
-            "proximity_zone_drw.mp4",
+            f"proximity_zone_drw{SUFFIX}.mp4",
             writer=FFMpegWriter(fps=FPS, bitrate=6000, codec="libx264",
                                 extra_args=["-pix_fmt", "yuv420p"]),
             savefig_kwargs={"facecolor": BG})
