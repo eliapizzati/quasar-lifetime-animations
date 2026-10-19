@@ -49,9 +49,9 @@ ARGS = [a for a in sys.argv[1:] if a != "--light"]
 SUFFIX = "_light" if LIGHT_THEME else ""
 if LIGHT_THEME:
     # white slide: dark ink, amber quasar with a dark outline, darker amber (>= 3:1 on white)
-    # for the R_p marker / luminosity curve, blue R_p history (CVD-checked against the amber)
+    # for the R_p marker / luminosity curve, dark-green R_p history
     BG, FG = "#ffffff", "#1f1f1f"
-    STAR, BLUE = "#eda100", "#2a78d6"
+    STAR, BLUE = "#eda100", "#4d8b5a"   # BLUE = R_p history (dark green on white)
     WHITE, SPINE = "#1f1f1f", "#8c8c8c"        # WHITE = main ink (labels, smoothed flux)
     MARK, RAW, STAR_EDGE = "#b07800", "#9a9a9a", "#5c3f00"
 else:
