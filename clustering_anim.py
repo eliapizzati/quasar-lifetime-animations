@@ -112,14 +112,16 @@ R0A, R0B, GAM = 11.0, 4.5 if EXTREME else 6.5, 1.8
 if LIGHT_THEME:
     # white slide: dark ink for text, deeper green / amber (CVD-checked on white),
     # dark star outline because amber on white is low contrast
-    BG, FG, MUTED = "#ffffff", "#1f1f1f", "#5c5c5c"
-    GREY, GREEN, LIGHT = "#c8c8c8", "#199e70", "#7cc9a8"
-    STAR, STAR_EDGE, LINE_ON = "#eda100", "#5c3f00", "#c98a00"
-    BOXFACE, SPINE, ACCENT = "#f7f7f5", "#8c8c8c", "#2a78d6"
-    OFFLINE, GUIDE, MEANLINE = "#9a9a9a", "#8a8a8a", "#199e70"
-    INK_COUNT, INK_PUNCH = "#1f1f1f", "#1f1f1f"
-    INK_FA, INK_FB = "#1f1f1f", "#1f1f1f"
-    BOX_LW, STAR_LW, LINE_LW = 2.5, 0.8, 2.4
+    # Same family as the white proximity-zone videos: hosts in the dark green #4d8b5a,
+    # quasars amber with a dark outline, active lightcurve in dark amber (>= 3:1 on white).
+    BG, FG, MUTED = "#ffffff", "#1f2328", "#5f6368"
+    GREY, GREEN, LIGHT = "#cbcbc7", "#4d8b5a", "#9dc4a5"
+    STAR, STAR_EDGE, LINE_ON = "#eda100", "#5c3f00", "#b07800"
+    BOXFACE, SPINE, ACCENT = "#fbfbfa", "#b8b8b4", "#5f6368"
+    OFFLINE, GUIDE, MEANLINE = "#a3a3a3", "#9a9a9a", "#4d8b5a"
+    INK_COUNT, INK_PUNCH = "#1f2328", "#1f2328"
+    INK_FA, INK_FB = "#1f2328", "#1f2328"
+    BOX_LW, STAR_LW, LINE_LW = 1.6, 0.8, 2.6
 else:
     BG, FG, MUTED = "#3d3d3d", "#ededed", "#cfcfcf"
     GREY, GREEN, LIGHT = "#b8b8b8", "#5fcf80", "#9be7b4"
@@ -129,6 +131,22 @@ else:
     INK_COUNT, INK_PUNCH = "#f7d64a", "#f7d64a"
     INK_FA, INK_FB = GREEN, LIGHT
     BOX_LW, STAR_LW, LINE_LW = 4, 0.6, 2.2
+# typography: the white theme gets larger titles, muted secondary text and an italic,
+# grey strip label; the dark theme keeps its original sizes
+if LIGHT_THEME:
+    TY = dict(title=20, sub=14, title_full=(0.93, 0.885), title_info=(0.91, 0.865),
+              cnt_full=15, eq_full=16, cnt_info=17, eq_info=19,
+              lc_text="one host", lc_fs=11, lc_style="italic", lc_color=MUTED,
+              ax_fs=12, ax_color=MUTED, lim_fs=11,
+              xi_lab=(12, 14), xi_tick=10, xi_leg=11, xi_r0=13, eq1=16, eq2=18, punch=15,
+              count_fmt=r"$N_{{\rm QSO}}\,/\,N_{{\rm host}}$ = {a} / {b}")
+else:
+    TY = dict(title=17, sub=14 if EDD else 13, title_full=(0.925, 0.88), title_info=(0.905, 0.862),
+              cnt_full=14, eq_full=15, cnt_info=17, eq_info=18,
+              lc_text="one host:", lc_fs=10, lc_style="normal", lc_color=ACCENT,
+              ax_fs=11, ax_color=FG, lim_fs=10,
+              xi_lab=(11, 13), xi_tick=9, xi_leg=9, xi_r0=12, eq1=14, eq2=16, punch=14,
+              count_fmt=None)
 plt.rcParams.update({"font.family": "DejaVu Sans", "mathtext.fontset": "dejavusans",
                      "text.color": FG, "axes.labelcolor": FG,
                      "xtick.color": FG, "ytick.color": FG})
@@ -341,19 +359,20 @@ def lc_axes(x0, l, thr, label_thr=False, ylim=None, label_below=False, mean=None
     for s_ in ["top", "right", "left"]:
         ax.spines[s_].set_visible(False)
     ax.spines["bottom"].set_color(SPINE)
-    ax.set_xlabel("time", fontsize=11, labelpad=2)
-    ax.text(T_QSO - 0.4, hi - 0.12 * (hi - lo), "one host:", fontsize=10,
-            color=ACCENT, va="center")
+    ax.set_xlabel("time", fontsize=TY["ax_fs"], labelpad=2, color=TY["ax_color"])
+    ax.text(T_QSO - 0.4, hi - 0.12 * (hi - lo), TY["lc_text"], fontsize=TY["lc_fs"],
+            color=TY["lc_color"], style=TY["lc_style"], va="center")
     if MODE == "drw":
         ax.axhline(thr, color=MUTED, lw=1.0, ls="--")
         if mean is not None and GROWTH_DEX > 0:          # growing mean ~ M_BH(t)
             ax.plot(t_frames, mean, color=MEANLINE, lw=1.2, ls=":", alpha=0.9)
         if L_LIM is not None:
-            ax.set_ylabel(r"$\log L_{\rm bol}$", fontsize=11, labelpad=2)
+            ax.set_ylabel(r"$\log L_{\rm bol}$", fontsize=TY["ax_fs"], labelpad=2,
+                          color=TY["ax_color"])
         if label_thr:
             ax.text(DUR - 0.1, thr + (-0.08 if label_below else 0.08) * (hi - lo),
                     "survey limit" if L_LIM is not None else "threshold", ha="right",
-                    va="top" if label_below else "bottom", fontsize=10, color=MUTED,
+                    va="top" if label_below else "bottom", fontsize=TY["lim_fs"], color=MUTED,
                     zorder=10, bbox=dict(facecolor=BG, edgecolor="none", alpha=0.85, pad=1.5))
     line, = ax.plot([], [], color=OFFLINE, lw=1.8)
     above, = ax.plot([], [], color=LINE_ON, lw=LINE_LW)
@@ -374,11 +393,10 @@ LCB = lc_axes(X0B, lB[:, trackB], thrB, label_thr=L_LIM is None, ylim=YLIM, mean
 # ---------------- figure: text overlays ----------------
 def add_titles(y1, y2):
     tA, sA_, tB, sB_ = TITLES[SCENARIO]
-    sub = 14 if EDD else 13
-    fig.text(CX_A, y1, tA, ha="center", fontsize=17, weight="bold")
-    fig.text(CX_A, y2, sA_, ha="center", fontsize=sub, color=MUTED)
-    fig.text(CX_B, y1, tB, ha="center", fontsize=17, weight="bold")
-    fig.text(CX_B, y2, sB_, ha="center", fontsize=sub, color=MUTED)
+    fig.text(CX_A, y1, tA, ha="center", fontsize=TY["title"], weight="bold")
+    fig.text(CX_A, y2, sA_, ha="center", fontsize=TY["sub"], color=MUTED)
+    fig.text(CX_B, y1, tB, ha="center", fontsize=TY["title"], weight="bold")
+    fig.text(CX_B, y2, sB_, ha="center", fontsize=TY["sub"], color=MUTED)
 
 def duty_label(f, sym):
     """f_duty text; a clip average when growth makes the instantaneous value drift."""
@@ -387,13 +405,13 @@ def duty_label(f, sym):
     return rf"$f_{{\rm duty}} {sym} {f:.2f}$"
 
 if FULL:
-    add_titles(0.925, 0.88)
-    cntA = fig.text(CX_A, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
-    cntB = fig.text(CX_B, 0.258, "", ha="center", fontsize=14, color=INK_COUNT)
-    eq3A = fig.text(CX_A, 0.215, duty_label(fA, r"\approx"), ha="center", fontsize=15,
-                    color=INK_FA, alpha=0)
-    eq3B = fig.text(CX_B, 0.215, duty_label(fB, r"\approx"), ha="center", fontsize=15,
-                    color=INK_FB, alpha=0)
+    add_titles(*TY["title_full"])
+    cntA = fig.text(CX_A, 0.258, "", ha="center", fontsize=TY["cnt_full"], color=INK_COUNT)
+    cntB = fig.text(CX_B, 0.258, "", ha="center", fontsize=TY["cnt_full"], color=INK_COUNT)
+    eq3A = fig.text(CX_A, 0.215, duty_label(fA, r"\approx"), ha="center",
+                    fontsize=TY["eq_full"], color=INK_FA, alpha=0)
+    eq3B = fig.text(CX_B, 0.215, duty_label(fB, r"\approx"), ha="center",
+                    fontsize=TY["eq_full"], color=INK_FB, alpha=0)
 
     axX = fig.add_axes([0.765, 0.50, 0.215, 0.36], facecolor=BG)
     rr = np.logspace(-0.3, 1.6, 200)
@@ -401,36 +419,36 @@ if FULL:
     axX.set_xlim(rr[0], rr[-1]); axX.set_ylim(0.03, 300)
     for s_ in axX.spines.values():
         s_.set_color(SPINE)
-    axX.tick_params(labelsize=9, colors=FG)
-    axX.set_xlabel(r"$r\ [h^{-1}\,\mathrm{cMpc}]$", fontsize=11)
-    axX.set_ylabel(r"$\xi_{\rm QQ}(r)$", fontsize=13)
+    axX.tick_params(labelsize=TY["xi_tick"], colors=FG)
+    axX.set_xlabel(r"$r\ [h^{-1}\,\mathrm{cMpc}]$", fontsize=TY["xi_lab"][0])
+    axX.set_ylabel(r"$\xi_{\rm QQ}(r)$", fontsize=TY["xi_lab"][1])
     axX.axhline(1, color=GUIDE, lw=1, ls=":")
     xiA, = axX.plot([], [], color=GREEN, lw=2.6, label="large halos")
     xiB, = axX.plot([], [], color=LIGHT, lw=2.6, ls="--", label="small halos")
     r0l = [axX.axvline(R0A, color=GREEN, lw=1, alpha=0),
            axX.axvline(R0B, color=LIGHT, lw=1, alpha=0)]
-    r0t = [axX.text(R0A * 1.08, 0.05, r"$r_0$", color=GREEN, fontsize=12, alpha=0),
-           axX.text(R0B * 1.08, 0.05, r"$r_0$", color=LIGHT, fontsize=12, alpha=0)]
-    axX.legend(frameon=False, fontsize=9, loc="upper right", labelcolor=FG)
+    r0t = [axX.text(R0A * 1.08, 0.05, r"$r_0$", color=GREEN, fontsize=TY["xi_r0"], alpha=0),
+           axX.text(R0B * 1.08, 0.05, r"$r_0$", color=LIGHT, fontsize=TY["xi_r0"], alpha=0)]
+    axX.legend(frameon=False, fontsize=TY["xi_leg"], loc="upper right", labelcolor=FG)
     axX.set_visible(False)
 
     eq1 = fig.text(0.872, 0.385,
                    r"$r_0 \rightarrow b(M) \rightarrow M_{\rm host} \rightarrow n_{\rm host}$",
-                   ha="center", fontsize=14, alpha=0)
+                   ha="center", fontsize=TY["eq1"], alpha=0)
     eq2 = fig.text(0.872, 0.285,
                    r"$f_{\rm duty} = \dfrac{n_{\rm QSO}}{n_{\rm host}} \sim \dfrac{t_{\rm Q}}{t_{\rm H}}$",
-                   ha="center", fontsize=16, alpha=0)
+                   ha="center", fontsize=TY["eq2"], alpha=0)
     punch = fig.text(0.872, 0.13, "Same number of quasars.\nOnly clustering\ntells them apart.",
-                     ha="center", fontsize=14, weight="bold", color=INK_PUNCH, alpha=0,
+                     ha="center", fontsize=TY["punch"], weight="bold", color=INK_PUNCH, alpha=0,
                      linespacing=1.4)
 elif INFO:
     if EDD:
-        add_titles(0.905, 0.862)
-    cntA = fig.text(CX_A, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
-    cntB = fig.text(CX_B, 0.25, "", ha="center", fontsize=17, color=INK_COUNT)
-    eq3A = fig.text(CX_A, 0.205, duty_label(fA, "="), ha="center", fontsize=18,
+        add_titles(*TY["title_info"])
+    cntA = fig.text(CX_A, 0.25, "", ha="center", fontsize=TY["cnt_info"], color=INK_COUNT)
+    cntB = fig.text(CX_B, 0.25, "", ha="center", fontsize=TY["cnt_info"], color=INK_COUNT)
+    eq3A = fig.text(CX_A, 0.205, duty_label(fA, "="), ha="center", fontsize=TY["eq_info"],
                     color=INK_FA, alpha=0)
-    eq3B = fig.text(CX_B, 0.205, duty_label(fB, "="), ha="center", fontsize=18,
+    eq3B = fig.text(CX_B, 0.205, duty_label(fB, "="), ha="center", fontsize=TY["eq_info"],
                     color=INK_FB, alpha=0)
 
 # ---------------- per-frame updates ----------------
@@ -480,6 +498,10 @@ def update_counts(i, t, word, width):
     if t >= T_QSO:
         j = i - (i % COUNT_EVERY)
         onA = int((lA[j] > thrA).sum()); onB = int((lB[j] > thrB).sum())
+        if TY["count_fmt"]:
+            cntA.set_text(TY["count_fmt"].format(a=onA, b=N_HOST_A))
+            cntB.set_text(TY["count_fmt"].format(a=onB, b=N_HOST_B))
+            return
         cntA.set_text(rf"$N_{{\rm QSO}}${word} = {onA:{width}}   /   $N_{{\rm host}}$ = {N_HOST_A}")
         cntB.set_text(rf"$N_{{\rm QSO}}${word} = {onB:{width}}   /   $N_{{\rm host}}$ = {N_HOST_B}")
 
