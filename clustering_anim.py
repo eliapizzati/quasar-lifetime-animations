@@ -18,7 +18,9 @@ Scenarios (pick at most one; default: f_duty 0.75 vs 0.15):
              times: long, sustained episodes (left) vs short, rapid bursts (right). The mean
              log L of both rises slowly (exponential BH growth, GROWTH_DEX). drw mode
   --bulb     as --edd but static (no growth), and the left hosts are toy lightbulbs: long
-             episodes at constant L, short fully-off gaps. drw mode
+             episodes at constant L, short fully-off gaps. The right box keeps the bursty
+             short-tau DRW, with its population count steadied (STEADY_B). drw mode
+  --bulb2    as --bulb, but the right hosts are lightbulbs too (short constant-L bursts)
 
 Output options:
   --info     add N_QSO / N_host counters and f_duty under each box
@@ -41,13 +43,14 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 from scipy.stats import norm
+from matplotlib.offsetbox import TextArea, HPacker, VPacker, AnnotationBbox
 
 # ---------------- command line ----------------
 _p = argparse.ArgumentParser(description=__doc__,
                              formatter_class=argparse.RawDescriptionHelpFormatter)
 _p.add_argument("pos", nargs="*", metavar="onoff|drw|TIME",
                 help="lightcurve mode and/or a time in seconds for a still frame")
-for _flag in ("extreme", "edd", "bulb", "info", "full", "crop", "light"):
+for _flag in ("extreme", "edd", "bulb", "bulb2", "info", "full", "crop", "light"):
     _p.add_argument(f"--{_flag}", action="store_true")
 ARGS = _p.parse_args()
 
@@ -61,11 +64,12 @@ for _a in ARGS.pos:
         except ValueError:
             _p.error(f"unknown argument {_a!r}: expected onoff, drw or a time in seconds")
 
-SCENARIO = ("bulb" if ARGS.bulb else "edd" if ARGS.edd else
+SCENARIO = ("bulb2" if ARGS.bulb2 else "bulb" if ARGS.bulb else "edd" if ARGS.edd else
             "extreme" if ARGS.extreme else "default")
 EXTREME = SCENARIO != "default"            # 0.85 / 0.05 duty cycles
-EDD = SCENARIO in ("edd", "bulb")          # shared survey limit, long vs short tau_DRW
-BULB = SCENARIO == "bulb"                  # left hosts are lightbulbs, no growth
+EDD = SCENARIO in ("edd", "bulb", "bulb2") # shared survey limit, long vs short episodes
+BULB = SCENARIO in ("bulb", "bulb2")       # left hosts are lightbulbs, no growth
+BULB_B = SCENARIO == "bulb2"               # right hosts are lightbulbs too
 FULL, INFO, CROP, LIGHT_THEME = ARGS.full, ARGS.info, ARGS.crop, ARGS.light
 
 # ---------------- knobs ----------------
@@ -79,6 +83,7 @@ TAU_A, TAU_B = 3.0, 1.2    # DRW damping times [animation s]
 PER_A, PER_B = 6.0, 2.5    # on/off cycle periods [animation s]
 SIG_DEX, L_LIM = 1.0, None # DRW scatter [dex]; common survey limit (None = per-box threshold)
 GROWTH_DEX = 0.0           # rise of the mean log L over the visible clip
+STEADY_B = 0.0             # 0..1: pull the right box's count toward its mean (1 = constant)
 if EXTREME:
     N_QSO, N_HOST_A, N_HOST_B = 11, 13, 220     # f_duty = 0.85 and 0.05
     PER_A, PER_B = 8.0, 6.0
@@ -92,7 +97,9 @@ if EDD:
     SEED_A, TRACK_A = 153, 3   # left host starts just below the limit, then grows above it
 if BULB:
     GROWTH_DEX = 0.0       # static
+    STEADY_B = 0.75        # right count ~11 +/- 1 instead of +/- 3 (binomial noise of 220 hosts)
 PER_BULB = 24.0                 # --bulb: on/off period [s]; on for f_duty * PER_BULB
+PER_BULB_B = 6.0                # --bulb2: right on/off period [s] (on for 0.3 s)
 BULB_ON, BULB_OFF = 0.35, -0.9  # --bulb: on / off levels in log L_bol relative to the limit
 
 TITLES = {   # scenario -> (left title, left subtitle, right title, right subtitle)
@@ -104,6 +111,7 @@ TITLES = {   # scenario -> (left title, left subtitle, right title, right subtit
              "Short, rapid bursts", "many small hosts, rarely active"),
 }
 TITLES["extreme"] = TITLES["default"]
+TITLES["bulb2"] = TITLES["bulb"]
 
 # schematic correlation functions for the --full panel [h^-1 cMpc]
 R0A, R0B, GAM = 11.0, 4.5 if EXTREME else 6.5, 1.8
@@ -139,14 +147,14 @@ if LIGHT_THEME:
               lc_text="one host", lc_fs=11, lc_style="italic", lc_color=MUTED,
               ax_fs=12, ax_color=MUTED, lim_fs=11,
               xi_lab=(12, 14), xi_tick=10, xi_leg=11, xi_r0=13, eq1=16, eq2=18, punch=15,
-              count_fmt=r"$N_{{\rm QSO}}\,/\,N_{{\rm host}}$ = {a} / {b}")
+              rich=True)
 else:
     TY = dict(title=17, sub=14 if EDD else 13, title_full=(0.925, 0.88), title_info=(0.905, 0.862),
               cnt_full=14, eq_full=15, cnt_info=17, eq_info=18,
               lc_text="one host:", lc_fs=10, lc_style="normal", lc_color=ACCENT,
               ax_fs=11, ax_color=FG, lim_fs=10,
               xi_lab=(11, 13), xi_tick=9, xi_leg=9, xi_r0=12, eq1=14, eq2=16, punch=14,
-              count_fmt=None)
+              rich=False)
 plt.rcParams.update({"font.family": "DejaVu Sans", "mathtext.fontset": "dejavusans",
                      "text.color": FG, "axes.labelcolor": FG,
                      "xtick.color": FG, "ytick.color": FG})
@@ -216,6 +224,14 @@ def drw(rlc, n, tau, burn=40.0):
             out[j - nb] = x
     return out
 
+def steady(x, w):
+    """Blend each frame's values with the Gaussian quantiles of their ranks. Every host
+    keeps its own DRW (ranks change smoothly), but the number above any threshold is
+    pulled toward its expectation: w = 0 leaves the binomial scatter, w = 1 removes it."""
+    n = x.shape[1]
+    rank = np.argsort(np.argsort(x, axis=1), axis=1)
+    return (1 - w) * x + w * norm.ppf((rank + 0.5) / n)
+
 def onoff(rlc, n, per, f, soft=0.05):
     """Smoothed square waves (~1 on, ~0 off), on for a fraction f of each period."""
     ph = (np.arange(n) + rlc.uniform(0, 0.3, n)) / n
@@ -226,6 +242,8 @@ def onoff(rlc, n, per, f, soft=0.05):
 MEAN_A = MEAN_B = None     # mean log L of each population (drawn when it grows)
 if MODE == "drw":
     lA, lB = drw(rA_, N_HOST_A, TAU_A), drw(rB_, N_HOST_B, TAU_B)
+    if STEADY_B > 0:
+        lB = steady(lB, STEADY_B)
     thrA, thrB = norm.ppf(1 - fA), norm.ppf(1 - fB)       # time above = f_duty
     if L_LIM is not None:
         # log L_bol = mu + SIG_DEX * x, with mu set so that P(log L > L_LIM) = f_duty
@@ -244,6 +262,19 @@ if MODE == "drw":
         sA = onoff(rA_, N_HOST_A, PER_BULB, fA, soft=0.12)
         lA = BULB_OFF + (BULB_ON - BULB_OFF) * sA
         MEAN_A = None
+    if BULB_B:
+        # right: lightbulbs too, short bursts at constant luminosity. Symmetric pulses,
+        # widened so the time above the limit (not the time at half height) is f_duty.
+        w = 0.06 / PER_BULB_B
+        s_lim = (L_LIM - BULB_OFF) / (BULB_ON - BULB_OFF)
+        f_eff = fB + 2 * w * np.arctanh(2 * s_lim - 1)
+        ph = (np.arange(N_HOST_B) + rB_.uniform(0, 0.3, N_HOST_B)) / N_HOST_B
+        rB_.shuffle(ph)
+        x = np.mod((t_frames[:, None] - T_QSO) / PER_BULB_B + ph[None, :] - 0.5 * f_eff + 0.5,
+                   1.0) - 0.5
+        sB = 0.5 * (1 + np.tanh((0.5 * f_eff - np.abs(x)) / w))
+        lB = BULB_OFF + (BULB_ON - BULB_OFF) * sB
+        MEAN_B = None
 else:
     lA, lB = onoff(rA_, N_HOST_A, PER_A, fA), onoff(rB_, N_HOST_B, PER_B, fB)
     thrA = thrB = 0.5
@@ -309,7 +340,8 @@ def pick_switch_on(l, thr, t_on=2.5):
     return best
 
 if MODE == "drw" and BULB:
-    trackA, trackB = pick_switch_on(lA, thrA), pick_bursty(lB, thrB)
+    trackA = pick_switch_on(lA, thrA)
+    trackB = pick_track(lB, thrB, 3, min_len=0.2) if BULB_B else pick_bursty(lB, thrB)
 elif MODE == "drw" and EDD:
     trackA, trackB = TRACK_A, pick_bursty(lB, thrB)
 else:
@@ -398,6 +430,34 @@ def add_titles(y1, y2):
     fig.text(CX_B, y1, tB, ha="center", fontsize=TY["title"], weight="bold")
     fig.text(CX_B, y2, sB_, ha="center", fontsize=TY["sub"], color=MUTED)
 
+class RichText:
+    """Centred, multi-colour text: lines of (text, colour, weight) pieces, anchored at
+    (x, y) in figure coordinates by the bottom of the block. Pieces can be updated."""
+    def __init__(self, x, y, lines, fontsize, alpha=1.0, linesep=6):
+        self.areas = [[TextArea(t, textprops=dict(color=c, fontsize=fontsize, weight=w))
+                       for t, c, w in line] for line in lines]
+        rows = [HPacker(children=r, align="baseline", pad=0, sep=0) for r in self.areas]
+        box = rows[0] if len(rows) == 1 else VPacker(children=rows, align="center", pad=0,
+                                                     sep=linesep)
+        fig.add_artist(AnnotationBbox(box, (x, y), xycoords="figure fraction", frameon=False,
+                                      box_alignment=(0.5, 0.0), pad=0))
+        self.set_alpha(alpha)
+    def set(self, line, k, text):
+        self.areas[line][k].set_text(text)
+    def set_alpha(self, a):
+        for r in self.areas:
+            for ta in r:
+                ta._text.set_alpha(a)
+
+def count_text(y, fs):
+    """'11 of 13 hosts active': active quasars in the star amber, hosts in the host green."""
+    return RichText(CX_A, y, [[("", LINE_ON, "bold"), (" of ", MUTED, "normal"),
+                               (str(N_HOST_A), GREEN, "bold"), (" hosts active", MUTED, "normal")]],
+                    fs, alpha=0), \
+           RichText(CX_B, y, [[("", LINE_ON, "bold"), (" of ", MUTED, "normal"),
+                               (str(N_HOST_B), GREEN, "bold"), (" hosts active", MUTED, "normal")]],
+                    fs, alpha=0)
+
 def duty_label(f, sym):
     """f_duty text; a clip average when growth makes the instantaneous value drift."""
     if GROWTH_DEX > 0:
@@ -406,8 +466,11 @@ def duty_label(f, sym):
 
 if FULL:
     add_titles(*TY["title_full"])
-    cntA = fig.text(CX_A, 0.258, "", ha="center", fontsize=TY["cnt_full"], color=INK_COUNT)
-    cntB = fig.text(CX_B, 0.258, "", ha="center", fontsize=TY["cnt_full"], color=INK_COUNT)
+    if TY["rich"]:
+        cntA, cntB = count_text(0.252, TY["cnt_full"])
+    else:
+        cntA = fig.text(CX_A, 0.258, "", ha="center", fontsize=TY["cnt_full"], color=INK_COUNT)
+        cntB = fig.text(CX_B, 0.258, "", ha="center", fontsize=TY["cnt_full"], color=INK_COUNT)
     eq3A = fig.text(CX_A, 0.215, duty_label(fA, r"\approx"), ha="center",
                     fontsize=TY["eq_full"], color=INK_FA, alpha=0)
     eq3B = fig.text(CX_B, 0.215, duty_label(fB, r"\approx"), ha="center",
@@ -438,14 +501,24 @@ if FULL:
     eq2 = fig.text(0.872, 0.285,
                    r"$f_{\rm duty} = \dfrac{n_{\rm QSO}}{n_{\rm host}} \sim \dfrac{t_{\rm Q}}{t_{\rm H}}$",
                    ha="center", fontsize=TY["eq2"], alpha=0)
-    punch = fig.text(0.872, 0.13, "Same number of quasars.\nOnly clustering\ntells them apart.",
-                     ha="center", fontsize=TY["punch"], weight="bold", color=INK_PUNCH, alpha=0,
-                     linespacing=1.4)
+    if TY["rich"]:      # key words in the colours they have in the boxes
+        punch = RichText(0.872, 0.105,
+                         [[("Same number of ", FG, "bold"), ("quasars", LINE_ON, "bold"),
+                           (".", FG, "bold")],
+                          [("Only ", FG, "bold"), ("clustering", GREEN, "bold")],
+                          [("tells them apart.", FG, "bold")]], TY["punch"], alpha=0, linesep=8)
+    else:
+        punch = fig.text(0.872, 0.13, "Same number of quasars.\nOnly clustering\ntells them apart.",
+                         ha="center", fontsize=TY["punch"], weight="bold", color=INK_PUNCH,
+                         alpha=0, linespacing=1.4)
 elif INFO:
     if EDD:
         add_titles(*TY["title_info"])
-    cntA = fig.text(CX_A, 0.25, "", ha="center", fontsize=TY["cnt_info"], color=INK_COUNT)
-    cntB = fig.text(CX_B, 0.25, "", ha="center", fontsize=TY["cnt_info"], color=INK_COUNT)
+    if TY["rich"]:
+        cntA, cntB = count_text(0.244, TY["cnt_info"])
+    else:
+        cntA = fig.text(CX_A, 0.25, "", ha="center", fontsize=TY["cnt_info"], color=INK_COUNT)
+        cntB = fig.text(CX_B, 0.25, "", ha="center", fontsize=TY["cnt_info"], color=INK_COUNT)
     eq3A = fig.text(CX_A, 0.205, duty_label(fA, "="), ha="center", fontsize=TY["eq_info"],
                     color=INK_FA, alpha=0)
     eq3B = fig.text(CX_B, 0.205, duty_label(fB, "="), ha="center", fontsize=TY["eq_info"],
@@ -498,9 +571,10 @@ def update_counts(i, t, word, width):
     if t >= T_QSO:
         j = i - (i % COUNT_EVERY)
         onA = int((lA[j] > thrA).sum()); onB = int((lB[j] > thrB).sum())
-        if TY["count_fmt"]:
-            cntA.set_text(TY["count_fmt"].format(a=onA, b=N_HOST_A))
-            cntB.set_text(TY["count_fmt"].format(a=onB, b=N_HOST_B))
+        if TY["rich"]:      # figure spaces keep the line from jumping when digits change
+            cntA.set(0, 0, f"{onA:>2}".replace(" ", "\u2007"))
+            cntB.set(0, 0, f"{onB:>2}".replace(" ", "\u2007"))
+            cntA.set_alpha(1); cntB.set_alpha(1)     # hidden until the quasars switch on
             return
         cntA.set_text(rf"$N_{{\rm QSO}}${word} = {onA:{width}}   /   $N_{{\rm host}}$ = {N_HOST_A}")
         cntB.set_text(rf"$N_{{\rm QSO}}${word} = {onB:{width}}   /   $N_{{\rm host}}$ = {N_HOST_B}")
@@ -537,7 +611,8 @@ def frame(i):
 
 # ---------------- output ----------------
 TAG = (MODE + ("_full" if FULL else "_info" if INFO else "")
-       + {"default": "", "extreme": "_extreme", "edd": "_edd", "bulb": "_bulb"}[SCENARIO]
+       + {"default": "", "extreme": "_extreme", "edd": "_edd", "bulb": "_bulb",
+          "bulb2": "_bulb2"}[SCENARIO]
        + ("_light" if LIGHT_THEME else ""))
 # ffmpeg crop (w:h:x:y in px of the 1920x1080 frame): boxes + strips (+ titles for --edd/--bulb)
 CROP_GEOM = "1320:1040:0:40" if EDD else "1320:930:20:150"

@@ -8,6 +8,11 @@ python clustering_anim.py drw   --bulb --info --crop
 python clustering_anim.py drw   --bulb --full
 python clustering_anim.py drw   --bulb --info --crop --light
 python clustering_anim.py drw   --bulb --full --light
+# same, with lightbulb hosts (short constant-L bursts) on the right too
+python clustering_anim.py drw   --bulb2 --info --crop
+python clustering_anim.py drw   --bulb2 --full
+python clustering_anim.py drw   --bulb2 --info --crop --light
+python clustering_anim.py drw   --bulb2 --full --light
 # clustering, other variants
 python clustering_anim.py onoff --extreme --info --crop
 python clustering_anim.py drw   --extreme --info --crop

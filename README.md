@@ -20,15 +20,25 @@ Same clustered halo field, same number of visible quasars, one common survey lim
 $L_{\rm bol}$. **Left:** a few massive hosts that are active most of the time
 ($f_{\rm duty} = 0.85$), each a toy lightbulb that switches on and stays on at constant $L$.
 **Right:** many small hosts that are rarely active ($f_{\rm duty} = 0.05$), each a
-damped random walk with a short coherence time that only briefly flares above the limit.
+damped random walk with a short coherence time that only briefly rises above the limit.
 Only the clustering strength tells the two apart.
+
+The right box's visible count is steadied: each frame, the hosts' DRW values are blended
+with the Gaussian quantiles of their ranks (`STEADY_B = 0.75`). Each host keeps its own
+bursty lightcurve, but the count stays at $11 \pm 1$ instead of showing the $\pm 3$
+binomial scatter of 220 independent hosts, so it reads as "same number of quasars".
+
+A second version replaces the right DRWs with lightbulbs too: short bursts at constant
+luminosity (`--bulb2`).
 
 | | Dark slide | White slide |
 |---|---|---|
-| Boxes + lightcurves + counters | [`clustering_panels_drw_bulb.mp4`](videos/clustering_panels_drw_bulb.mp4) | [`clustering_panels_drw_bulb_light.mp4`](videos/clustering_panels_drw_bulb_light.mp4) |
-| Full slide ($\xi(r)$, equations) | [`clustering_dutycycle_drw_full_bulb.mp4`](videos/clustering_dutycycle_drw_full_bulb.mp4) | [`clustering_dutycycle_drw_full_bulb_light.mp4`](videos/clustering_dutycycle_drw_full_bulb_light.mp4) |
+| Steady + stochastic: boxes + lightcurves + counters | [`clustering_panels_drw_bulb.mp4`](videos/clustering_panels_drw_bulb.mp4) | [`clustering_panels_drw_bulb_light.mp4`](videos/clustering_panels_drw_bulb_light.mp4) |
+| Steady + stochastic: full slide ($\xi(r)$, equations) | [`clustering_dutycycle_drw_full_bulb.mp4`](videos/clustering_dutycycle_drw_full_bulb.mp4) | [`clustering_dutycycle_drw_full_bulb_light.mp4`](videos/clustering_dutycycle_drw_full_bulb_light.mp4) |
+| Steady + steady: boxes + lightcurves + counters | [`clustering_panels_drw_bulb2.mp4`](videos/clustering_panels_drw_bulb2.mp4) | [`clustering_panels_drw_bulb2_light.mp4`](videos/clustering_panels_drw_bulb2_light.mp4) |
+| Steady + steady: full slide | [`clustering_dutycycle_drw_full_bulb2.mp4`](videos/clustering_dutycycle_drw_full_bulb2.mp4) | [`clustering_dutycycle_drw_full_bulb2_light.mp4`](videos/clustering_dutycycle_drw_full_bulb2_light.mp4) |
 
-<img src="docs/clustering_panels_bulb_light.png" width="420">
+<img src="docs/clustering_panels_bulb_light.png" width="420"> <img src="docs/clustering_panels_bulb2_light.png" width="420">
 
 ### Proximity zones
 
@@ -68,6 +78,7 @@ Individual scripts:
 ```bash
 python clustering_anim.py drw --bulb --info --crop          # cropped boxes + lightcurves
 python clustering_anim.py drw --bulb --full --light         # full slide, white background
+python clustering_anim.py drw --bulb2 --info --crop         # lightbulbs in both boxes
 python clustering_anim.py --help                            # all scenarios and options
 python proximity_tq.py
 python proximity_drw.py
@@ -82,7 +93,8 @@ python proximity_tq.py 10          # any script + a time in seconds -> still PNG
 | `onoff` / `drw` | lightcurve model (default `drw`) |
 | `--extreme` | $f_{\rm duty} = 0.85$ (13 hosts) vs $0.05$ (220 hosts); default is $0.75$ vs $0.15$ |
 | `--edd` | `--extreme` + common survey limit, long vs short $\tau_{\rm DRW}$, growth trend |
-| `--bulb` | `--edd` without growth, and lightbulb hosts on the left (the main video) |
+| `--bulb` | `--edd` without growth, lightbulb hosts on the left, steadied DRW count on the right (the main video) |
+| `--bulb2` | as `--bulb`, with lightbulb hosts (short bursts) on the right too |
 | `--info` / `--full` | counters and $f_{\rm duty}$ / full slide with $\xi(r)$ and equations |
 | `--crop` | also write a version cropped to the boxes and lightcurves |
 | `--light` | white-background palette |
