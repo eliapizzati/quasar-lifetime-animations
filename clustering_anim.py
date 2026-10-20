@@ -351,8 +351,12 @@ else:
 
 # ---------------- figure: halo boxes ----------------
 fig = plt.figure(figsize=(12.8, 7.2), dpi=150, facecolor=BG)
-BOX_W = 0.30
-X0A, X0B = 0.035, 0.375
+if EDD:     # titled scenarios: slightly smaller boxes, wider gutter between the two cases
+    BOX_W = 0.29
+    X0A, X0B = 0.03, 0.40
+else:
+    BOX_W = 0.30
+    X0A, X0B = 0.035, 0.375
 CX_A, CX_B = X0A + BOX_W / 2, X0B + BOX_W / 2      # box centres (for text)
 
 def box_axes(x0):
@@ -476,7 +480,8 @@ if FULL:
     eq3B = fig.text(CX_B, 0.215, duty_label(fB, r"\approx"), ha="center",
                     fontsize=TY["eq_full"], color=INK_FB, alpha=0)
 
-    axX = fig.add_axes([0.765, 0.50, 0.215, 0.36], facecolor=BG)
+    axX = fig.add_axes([0.785, 0.50, 0.195, 0.36] if EDD else [0.765, 0.50, 0.215, 0.36],
+                       facecolor=BG)
     rr = np.logspace(-0.3, 1.6, 200)
     axX.set_xscale("log"); axX.set_yscale("log")
     axX.set_xlim(rr[0], rr[-1]); axX.set_ylim(0.03, 300)
@@ -615,7 +620,7 @@ TAG = (MODE + ("_full" if FULL else "_info" if INFO else "")
           "bulb2": "_bulb2"}[SCENARIO]
        + ("_light" if LIGHT_THEME else ""))
 # ffmpeg crop (w:h:x:y in px of the 1920x1080 frame): boxes + strips (+ titles for --edd/--bulb)
-CROP_GEOM = "1320:1040:0:40" if EDD else "1320:930:20:150"
+CROP_GEOM = "1360:1040:0:40" if EDD else "1320:930:20:150"
 
 if __name__ == "__main__":
     if STILL_T is not None:
