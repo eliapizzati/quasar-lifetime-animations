@@ -27,13 +27,13 @@ from matplotlib.colors import LinearSegmentedColormap
 from scipy.ndimage import gaussian_filter, gaussian_filter1d, uniform_filter1d
 
 # ---------------- knobs ----------------
-SEED, SEED_LC = 3, 5
+SEED, SEED_LC = 3, 15
 FPS, DUR = 30, 15.0
 WINDOW = 600.0              # kyr shown during the clip
 T_PRE = 3000.0              # kyr of prior quasar activity (burn-in of the H I zone)
 T_HE_PRIOR = 4.0e4          # kyr of earlier emission at <L>, counted for the He III front only
 DT_PRE = 2.0                # kyr, burn-in step
-SIG_DEX, TAU_DRW = 0.35, 100.0   # DRW scatter [dex] and damping time [kyr]
+SIG_DEX, TAU_DRW = 0.6, 40.0     # DRW scatter [dex] and damping time [kyr]
 T_BKG = 300.0
 R_S = 16.0
 RMAX = 14.0                 # pMpc shown
@@ -173,14 +173,18 @@ rpl, = axF.plot([0, 0], [-0.05, 1.0], color=MARK, lw=2.6)
 rpt = axF.text(0, 1.0, r"$R_{\rm p}$", color=MARK, fontsize=24, ha="left", va="bottom")
 
 # lightcurve + R_p history, shared time axis
-axL = fig.add_axes([X0, 0.255, W, 0.12], facecolor=BG); style(axL)
+axL = fig.add_axes([X0, 0.262, W, 0.12], facecolor=BG); style(axL)
 axL.set_xlim(0, WINDOW); axL.set_xticklabels([])
 axL.set_ylim(logL.min() - 0.15, logL.max() + 0.15)
-axL.set_yticks([]); axL.set_ylabel(r"$\log L$", fontsize=LAB)
+axL.yaxis.set_major_locator(matplotlib.ticker.MultipleLocator(1))   # log axis, decade ticks
+axL.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(
+    lambda v, _: {0: "1", 1: "10"}.get(round(v), rf"$10^{{{round(v)}}}$")))
+axL.tick_params(axis="y", labelsize=15)
+axL.set_ylabel(r"$L/\langle L\rangle$", fontsize=17)
 lline, = axL.plot([], [], color=MARK, lw=2.6)
 ldot, = axL.plot([], [], "o", color=MARK, ms=9)
 
-axR = fig.add_axes([X0, 0.095, W, 0.15], facecolor=BG); style(axR)
+axR = fig.add_axes([X0, 0.095, W, 0.14], facecolor=BG); style(axR)
 axR.set_xlim(0, WINDOW)
 axR.set_ylim(0.9 * lo16.min(), 1.08 * hi84.max())
 axR.set_xlabel("time [kyr]", fontsize=LAB, labelpad=3)
@@ -192,8 +196,8 @@ mdot, = axR.plot([], [], "o", color=BLUE, ms=9)
 
 def frame(i):
     imH.set_data(np.log10(XHI_BKG * Delta2 * Yk[i][None, :]))
-    l = L[i]
-    qso.set_sizes([500 + 350 * min(l, 2.5)]); glow.set_sizes([6000 * min(l, 2.5)])
+    ll = np.clip(logL[i], -2.0, 1.15)          # star and glow scale with log L
+    qso.set_sizes([650 * 10 ** (0.4 * ll)]); glow.set_sizes([4000 * 10 ** (0.5 * ll)])
     fline.set_data(r, Fk[i]); sline.set_data(r, Fks[i])
     if ffill[0] is not None: ffill[0].remove()
     ffill[0] = axF.fill_between(r, 0, Fk[i], color=FG, alpha=0.10, lw=0)

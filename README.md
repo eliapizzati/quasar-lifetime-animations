@@ -53,8 +53,9 @@ then grows again as the He II photoheating front passes.
 
 [`proximity_zone_drw.mp4`](videos/proximity_zone_drw.mp4)
 (white slide: [`proximity_zone_drw_light.mp4`](videos/proximity_zone_drw_light.mp4)):
-a flickering (DRW) quasar.
-$R_{\rm p}$ follows a lagged, smoothed copy of $L(t)$.
+a strongly flickering quasar: a damped random walk in $\log L$ with 0.6 dex scatter and a
+40 kyr damping time, so $L$ swings over ~3 decades within the clip.
+$R_{\rm p}$ follows a lagged, smoothed copy of $L(t)$, between ~3 and ~10 pMpc.
 
 ## Other clustering variants
 
